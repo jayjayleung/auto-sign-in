@@ -193,7 +193,8 @@ public class ApiUtil {
                 startBtn.click();
             }
             Thread.sleep(15000);
-            page.content();
+            System.out.println("永洪抽奖完成");
+            System.out.println(page.content());
         }
 
     }
