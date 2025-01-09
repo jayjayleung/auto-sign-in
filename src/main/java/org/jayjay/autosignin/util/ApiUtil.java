@@ -18,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.net.HttpCookie;
 import java.util.*;
 
 /**
@@ -68,6 +69,13 @@ public class ApiUtil {
         headers.put("Host", "www.modb.pro");
         headers.put("Origin", "https://www.modb.pro");
         headers.put("Referer", "https://www.modb.pro/login?redirect=%2ForderList");
+        return headers;
+    }
+    public static Map<String, String> getYhHeader() {
+        Map<String, String> headers = new HashMap<>(commonHeaders);
+        headers.put("Host", "club.yonghongtech.com");
+        headers.put("Origin", "https://club.yonghongtech.com");
+        headers.put("Referer", "https://club.yonghongtech.com/home.php");
         return headers;
     }
 
@@ -173,6 +181,11 @@ public class ApiUtil {
                 log.info("点击了");
                 loginBtn.click();
             }
+            List<Cookie> cookies = page.cookies();
+            String body = HttpRequest.post("https://tidb.net/api/points/daily-checkin")
+                    .cookie(page.cookies().stream().map(cookie -> new HttpCookie(cookie.getName(), cookie.getValue())).toList())
+                    .headerMap(getYhHeader(), true).execute().body();
+            System.out.println(body);
 //            page.waitForNavigation();
             Thread.sleep(10000);
         }
