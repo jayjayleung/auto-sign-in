@@ -151,7 +151,7 @@ public class ApiUtil {
         checkInYongHong();
     }
 
-    public void checkInYongHong() throws Exception {
+    public static void checkInYongHong() throws Exception {
         String yhUsername = System.getenv("YH_USERNAME");
         String yhPassword = System.getenv("YH_PASSWORD");
         //自动下载，第一次下载后不会再下载
