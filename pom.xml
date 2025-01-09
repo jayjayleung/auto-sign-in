@@ -55,13 +55,18 @@
         <!-- 插件配置 -->
         <plugins>
             <!-- Java 编译插件 -->
+
+            <!-- 构建 JAR 包插件 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.12.1</version>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.2.2</version>
                 <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
+                    <archive>
+                        <manifest>
+                            <mainClass>org.jayjay.autosignin.MainApplication</mainClass>
+                        </manifest>
+                    </archive>
                 </configuration>
             </plugin>
 
