@@ -9,10 +9,9 @@
 name: autoSignIn
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  schedule:
+    - cron: "0 4 * * *" # 北京时间上午06:30
+  workflow_dispatch:
 
 env:
   test: ${{ secrets.TEST }}
