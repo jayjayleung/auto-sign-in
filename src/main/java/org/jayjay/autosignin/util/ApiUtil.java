@@ -182,7 +182,8 @@ public class ApiUtil {
                 loginBtn.click();
             }
 
-            page.waitForNavigation();
+//            page.waitForNavigation();
+            Thread.sleep(6000);
             System.out.println(page.content());
             page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
