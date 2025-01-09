@@ -182,8 +182,9 @@ public class ApiUtil {
                 loginBtn.click();
             }
 
-            Thread.sleep(3000);
+            page.waitForNavigation();
             System.out.println(page.content());
+            Page page1 = browser.newPage();
             page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
             ElementHandle startBtn = page.waitForSelector("#startbtn");
@@ -191,7 +192,7 @@ public class ApiUtil {
                 System.out.println("开始抽奖！");
                 startBtn.click();
             }
-            Thread.sleep(3000);
+            Thread.sleep(15000);
             page.content();
         }
 
