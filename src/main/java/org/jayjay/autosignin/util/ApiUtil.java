@@ -13,7 +13,6 @@ import com.ruiyun.jvppeteer.cdp.entities.LaunchOptions;
 import com.ruiyun.jvppeteer.cdp.entities.Protocol;
 import com.ruiyun.jvppeteer.cdp.entities.RevisionInfo;
 import com.ruiyun.jvppeteer.common.Product;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -27,7 +26,6 @@ import java.util.Objects;
  * @ClassName: org.springblade.autosignin.util.ApiUtil
  * @Description: Api请求工具类
  */
-@Slf4j
 public class ApiUtil {
 
 
@@ -179,7 +177,7 @@ public class ApiUtil {
             System.out.println(loginBtn);
 //            loginBtn.click();
             if (Objects.nonNull(loginBtn)) {
-                log.info("点击了");
+                System.out.println("点击登录");
                 loginBtn.click();
             }
             page.waitForNavigation();
