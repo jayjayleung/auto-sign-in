@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 env:
-  test: ${{ secrets.TEST }}
+  TEST: ${{ secrets.TEST }}
   
 jobs:
   build:

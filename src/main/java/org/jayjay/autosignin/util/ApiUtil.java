@@ -3,23 +3,23 @@ package org.jayjay.autosignin.util;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
-import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.ruiyun.jvppeteer.api.core.Browser;
 import com.ruiyun.jvppeteer.api.core.ElementHandle;
 import com.ruiyun.jvppeteer.api.core.Page;
-import com.ruiyun.jvppeteer.api.core.Response;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
-import com.ruiyun.jvppeteer.cdp.entities.*;
+import com.ruiyun.jvppeteer.cdp.entities.LaunchOptions;
+import com.ruiyun.jvppeteer.cdp.entities.Protocol;
+import com.ruiyun.jvppeteer.cdp.entities.RevisionInfo;
 import com.ruiyun.jvppeteer.common.Product;
-import com.ruiyun.jvppeteer.common.PuppeteerLifeCycle;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 
-import java.io.IOException;
-import java.net.HttpCookie;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * @Author: jayjay
@@ -30,12 +30,6 @@ import java.util.*;
 @Slf4j
 public class ApiUtil {
 
-    public static String contentStr = "<p><span>${text}</span></p><div class=\"media-wrap image-wrap\"><img src=\"/person/file/fileUrl?ossId=${ossId}\"></div><p></p>";
-    public static String contentTextStr = "<p><span>${text}</span></p>";
-
-    public static void main(String[] args) {
-
-    }
 
     @Test
     public void test1() {
@@ -71,6 +65,7 @@ public class ApiUtil {
         headers.put("Referer", "https://www.modb.pro/login?redirect=%2ForderList");
         return headers;
     }
+
     public static Map<String, String> getYhHeader() {
         Map<String, String> headers = new HashMap<>(commonHeaders);
         headers.put("Host", "club.yonghongtech.com");
@@ -99,9 +94,11 @@ public class ApiUtil {
      */
     public static String checkInModb() {
         String url = "https://www.modb.pro/api/login";
+        String modbUsername = System.getenv("MODB_USERNAME");
+        String modbPassword = System.getenv("MODB_PASSWORD");
         JSONObject bodyJson = JSONUtil.createObj();
-        bodyJson.set("phoneNum", "15913213996");
-        bodyJson.set("password", "sjie19950901.");
+        bodyJson.set("phoneNum", modbUsername);
+        bodyJson.set("password", modbPassword);
         HttpResponse res = HttpRequest.post(url).headerMap(getModbHeader(), true)
                 .body(bodyJson.toString())
                 .execute();
@@ -126,10 +123,12 @@ public class ApiUtil {
     }
 
     public static String checkInTidb() {
+        String tidbUsername = System.getenv("TIDB_USERNAME");
+        String tidbPassword = System.getenv("TIDB_PASSWORD");
         String url = "https://accounts.pingcap.cn/api/login/password";
         JSONObject bodyJson = JSONUtil.createObj();
-        bodyJson.set("identifier", "15913213996");
-        bodyJson.set("password", "sjie19950901.");
+        bodyJson.set("identifier", tidbUsername);
+        bodyJson.set("password", tidbPassword);
         bodyJson.set("redirect_to", "https://tidb.net/member");
         HttpResponse res = HttpRequest.post(url).headerMap(getTidbLoginHeader(), true)
                 .body(bodyJson.toString())
@@ -153,6 +152,8 @@ public class ApiUtil {
     }
 
     public void checkInYongHong() throws Exception {
+        String yhUsername = System.getenv("YH_USERNAME");
+        String yhPassword = System.getenv("YH_PASSWORD");
         //自动下载，第一次下载后不会再下载
         RevisionInfo revisionInfo = Puppeteer.downloadBrowser();
         System.out.println("revisionInfo: " + revisionInfo);
@@ -166,18 +167,18 @@ public class ApiUtil {
                 .protocol(Protocol.CDP)
                 .product(Product.Chrome).build();
 //        options.setProduct(Product.Chrome);
-        try(Browser browser = Puppeteer.launch(options)) {
+        try (Browser browser = Puppeteer.launch(options)) {
             Page page = browser.newPage();
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
             page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no");
             ElementHandle userName = page.$("input[name='username']");
-            userName.type("15913213996");
-            page.type("input[name='password']","sjie19950901.");
+            userName.type(yhUsername);
+            page.type("input[name='password']", yhPassword);
 //            page.click("input[name='loginsubmit']");
             ElementHandle loginBtn = page.$("button[name='loginsubmit']");
             System.out.println(loginBtn);
 //            loginBtn.click();
-            if(Objects.nonNull(loginBtn)) {
+            if (Objects.nonNull(loginBtn)) {
                 log.info("点击了");
                 loginBtn.click();
             }
