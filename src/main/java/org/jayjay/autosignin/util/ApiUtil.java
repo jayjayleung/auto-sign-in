@@ -117,6 +117,7 @@ public class ApiUtil {
                 .cookie(res.getCookies())
                 .headerMap(modbHeader, true).execute().body();
 //        System.out.println(body1);
+        System.out.println(toJSON(body1).getStr("operateMessage"));
         return toJSON(body1).getStr("operateMessage");
     }
 
