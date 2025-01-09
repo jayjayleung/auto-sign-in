@@ -181,12 +181,7 @@ public class ApiUtil {
                 log.info("点击了");
                 loginBtn.click();
             }
-            List<Cookie> cookies = page.cookies();
-            String body = HttpRequest.post("https://tidb.net/api/points/daily-checkin")
-                    .cookie(page.cookies().stream().map(cookie -> new HttpCookie(cookie.getName(), cookie.getValue())).toList())
-                    .headerMap(getYhHeader(), true).execute().body();
-            System.out.println(body);
-//            page.waitForNavigation();
+            page.waitForNavigation();
             Thread.sleep(10000);
         }
 
