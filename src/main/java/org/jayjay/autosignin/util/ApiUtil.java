@@ -161,7 +161,7 @@ public class ApiUtil {
         argList.add("--no-sandbox");
         argList.add("--disable-setuid-sandbox");
         LaunchOptions options = LaunchOptions.builder().args(argList).defaultViewport(null)
-                .headless(false)
+                .headless(true)
                 .protocol(Protocol.CDP)
                 .product(Product.Chrome).build();
 //        options.setProduct(Product.Chrome);
