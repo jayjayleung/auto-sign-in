@@ -180,8 +180,10 @@ public class ApiUtil {
                 System.out.println("点击登录");
                 loginBtn.click();
             }
-            page.waitForNavigation();
-            Thread.sleep(10000);
+
+            Thread.sleep(5000);
+            System.out.println(page.content());
+//            page.waitForNavigation();
         }
 
     }
