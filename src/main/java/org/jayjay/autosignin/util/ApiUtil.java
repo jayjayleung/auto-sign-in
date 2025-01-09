@@ -184,7 +184,6 @@ public class ApiUtil {
 
             page.waitForNavigation();
             System.out.println(page.content());
-            Page page1 = browser.newPage();
             page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
             ElementHandle startBtn = page.waitForSelector("#startbtn");
