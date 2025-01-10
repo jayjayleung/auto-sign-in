@@ -189,7 +189,7 @@ public class ApiUtil {
 
             }
             Thread.sleep(6000);
-            System.out.println(page.content());
+//            System.out.println(page.content());
             page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
             ElementHandle startBtn = page.waitForSelector("#startbtn");
