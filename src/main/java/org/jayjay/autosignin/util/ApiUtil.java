@@ -149,6 +149,7 @@ public class ApiUtil {
     public static void checkInYongHong() throws Exception {
         String yhUsername = System.getenv("YH_USERNAME");
         String yhPassword = System.getenv("YH_PASSWORD");
+        String yhUid = System.getenv("YH_UID");
         System.out.println("yhUsername: " + yhUsername);
         System.out.println("yhPassword: " + yhPassword);
 
@@ -172,7 +173,6 @@ public class ApiUtil {
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
 //            page.setExtraHTTPHeaders(commonHeaders);
             page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no");
-            page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
             ElementHandle userName = page.$("input[name='username']");
             userName.type(yhUsername);
             page.type("input[name='password']", yhPassword);
@@ -183,32 +183,15 @@ public class ApiUtil {
             loginBtn.click();
             loginBtn.dispose();
             Thread.sleep(5000);
-            page.reload();
-//            if (Objects.nonNull(loginBtn)) {
-//                System.out.println("点击登录");
-//                loginBtn.click();
-//                Thread.sleep(5000);
-//                System.out.println(page.url());
-//                System.out.println(page.cookies());
-//            }
-
-            Thread.sleep(5000);
             System.out.println(page.cookies());
-            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
-            if (any.isPresent()) {
-                Page card = browser.newPage();
-                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
-                card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
-                System.out.println("进入打卡页面");
-                Thread.sleep(5000);
-                System.out.println(card.url());
-            }else {
-                System.out.println("获取cookie失败");
-            }
+            Page card = browser.newPage();
+            card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + yhUid + "&do=signlog&from=space");
+            System.out.println("进入打卡页面");
+            Thread.sleep(5000);
+            System.out.println(card.url());
 //            System.out.println(page.content());
             Page cj = browser.newPage();
 
-            cj.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
             cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
             System.out.println("开始抽奖！");
