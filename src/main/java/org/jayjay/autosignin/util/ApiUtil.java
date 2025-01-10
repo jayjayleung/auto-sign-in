@@ -188,6 +188,8 @@ public class ApiUtil {
                 System.out.println("进入打卡页面");
                 Thread.sleep(5000);
                 System.out.println(card.url());
+            }else {
+                System.out.println("获取cookie失败");
             }
 //            System.out.println(page.content());
             Page cj = browser.newPage();
