@@ -172,15 +172,19 @@ public class ApiUtil {
 //            page.click("input[name='loginsubmit']");
             ElementHandle loginBtn = page.$("button[name='loginsubmit']");
 //            System.out.println(loginBtn);
-//            loginBtn.click();
-            if (Objects.nonNull(loginBtn)) {
-                System.out.println("点击登录");
-                loginBtn.click();
-                Thread.sleep(5000);
-                System.out.println(page.url());
+            System.out.println("点击登录");
+            loginBtn.click();
+            loginBtn.dispose();
+            Thread.sleep(5000);
+//            if (Objects.nonNull(loginBtn)) {
+//                System.out.println("点击登录");
+//                loginBtn.click();
+//                Thread.sleep(5000);
+//                System.out.println(page.url());
 //                System.out.println(page.cookies());
-            }
+//            }
 
+            Thread.sleep(5000);
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if (any.isPresent()) {
                 Page card = browser.newPage();
