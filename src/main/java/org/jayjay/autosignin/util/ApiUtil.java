@@ -149,6 +149,8 @@ public class ApiUtil {
     public static void checkInYongHong() throws Exception {
         String yhUsername = System.getenv("YH_USERNAME");
         String yhPassword = System.getenv("YH_PASSWORD");
+        System.out.println("yhUsername: " + yhUsername);
+        System.out.println("yhPassword: " + yhPassword);
         //自动下载，第一次下载后不会再下载
         RevisionInfo revisionInfo = Puppeteer.downloadBrowser();
         System.out.println("revisionInfo: " + revisionInfo);
@@ -185,6 +187,7 @@ public class ApiUtil {
 //            }
 
             Thread.sleep(5000);
+            System.out.println(page.cookies());
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if (any.isPresent()) {
                 Page card = browser.newPage();
