@@ -47,5 +47,5 @@ jobs:
             --add-opens=java.base/java.lang.Process=ALL-UNNAMED \
             --add-opens=java.base/java.io=ALL-UNNAMED \ 
             --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
-            --add-opens java.base/java.util.concurrent=ALL-UNNAMED \
+            --add-opens java.base/java.util.concurrent=ALL-UNNAMED
 
