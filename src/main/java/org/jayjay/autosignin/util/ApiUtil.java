@@ -159,12 +159,15 @@ public class ApiUtil {
 //        LaunchOptions options = new LaunchOptionsBuilder().withArgs(argList).withHeadless(false).build();
         argList.add("--no-sandbox");
         argList.add("--disable-setuid-sandbox");
+        argList.add("--disable-setuid-sandbox");
+        argList.add("user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'");
         LaunchOptions options = LaunchOptions.builder().args(argList).defaultViewport(null)
                 .headless(true)
                 .protocol(Protocol.CDP)
                 .product(Product.Chrome).build();
 //        options.setProduct(Product.Chrome);
         try (Browser browser = Puppeteer.launch(options)) {
+
             Page page = browser.newPage();
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
             page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no");
