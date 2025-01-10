@@ -161,7 +161,7 @@ public class ApiUtil {
         argList.add("--no-sandbox");
         argList.add("--disable-setuid-sandbox");
 //        argList.add("--user_agent=\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82\"");
-        LaunchOptions options = LaunchOptions.builder().args(argList).defaultViewport(null)
+        LaunchOptions options = LaunchOptions.builder().args(argList).defaultViewport(new Viewport(1900, 1080))
                 .headless(true)
                 .protocol(Protocol.CDP)
                 .product(Product.Chrome).build();
@@ -169,6 +169,7 @@ public class ApiUtil {
         try (Browser browser = Puppeteer.launch(options)) {
             System.out.println(browser.userAgent());
             Page page = browser.newPage();
+            page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
 //            page.setExtraHTTPHeaders(commonHeaders);
             page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no");
@@ -185,20 +186,24 @@ public class ApiUtil {
             String i = Integer.valueOf(yhUid)+"";
             StringBuilder stringBuilder = new StringBuilder(yhUid);
             System.out.println(page.cookies());
-            Page card = browser.newPage();
             String uid = getUid(page.content());
             if(StrUtil.isBlank(uid)){
                 System.out.println("获取uid失败");
             }
-            card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + uid + "&do=signlog&from=space");
-            System.out.println(i);
-            System.out.println(stringBuilder);
-            System.out.println("进入打卡页面");
-            Thread.sleep(5000);
-            System.out.println(card.url());
-            System.out.println(card.content());
+            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
+            if (any.isPresent()) {
+                Page card = browser.newPage();
+                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
+                card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
+                System.out.println("进入打卡页面");
+                Thread.sleep(5000);
+                System.out.println(card.url());
+            }else {
+                System.out.println("获取cookie失败");
+            }
             Page cj = browser.newPage();
 
+            cj.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
             cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
             System.out.println("开始抽奖！");
