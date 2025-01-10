@@ -9,16 +9,14 @@ import com.ruiyun.jvppeteer.api.core.Browser;
 import com.ruiyun.jvppeteer.api.core.ElementHandle;
 import com.ruiyun.jvppeteer.api.core.Page;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
+import com.ruiyun.jvppeteer.cdp.entities.Cookie;
 import com.ruiyun.jvppeteer.cdp.entities.LaunchOptions;
 import com.ruiyun.jvppeteer.cdp.entities.Protocol;
 import com.ruiyun.jvppeteer.cdp.entities.RevisionInfo;
 import com.ruiyun.jvppeteer.common.Product;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * @Author: jayjay
@@ -132,17 +130,13 @@ public class ApiUtil {
         HttpResponse res = HttpRequest.post(url).headerMap(getTidbLoginHeader(), true)
                 .body(bodyJson.toString())
                 .execute();
-
-        res.getCookies().forEach(System.out::println);
         System.out.println("------------");
-        System.out.println(res.getCookieStr());
-        System.out.println(res.header("Authorization"));
         System.out.println(res.body());
         String body1 = HttpRequest.post("https://tidb.net/api/points/daily-checkin")
                 .cookie(res.getCookies())
                 .headerMap(getTidbCheckInHeader(), true).header("x-csrftoken", res.getCookieValue("csrftoken")).execute().body();
         System.out.println(toJSON(body1).getStr("detail"));
-        return body1;
+        return toJSON(body1).toString();
     }
 
     @Test
@@ -182,7 +176,16 @@ public class ApiUtil {
                 loginBtn.click();
             }
 
+            System.out.println(page.content());
+            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "uid".equalsIgnoreCase(cookie.getName())).findAny();
+            if(any.isPresent()) {
 //            page.waitForNavigation();
+                Thread.sleep(6000);
+                System.out.println("去打卡页面");
+                page.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
+                System.out.println(page.content());
+
+            }
             Thread.sleep(6000);
             System.out.println(page.content());
             page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
