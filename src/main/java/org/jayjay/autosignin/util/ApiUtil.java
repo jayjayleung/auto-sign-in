@@ -1,5 +1,6 @@
 package org.jayjay.autosignin.util;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
@@ -16,6 +17,8 @@ import com.ruiyun.jvppeteer.common.Product;
 import org.junit.Test;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @Author: jayjay
@@ -181,11 +184,13 @@ public class ApiUtil {
             Thread.sleep(5000);
             String i = Integer.valueOf(yhUid)+"";
             StringBuilder stringBuilder = new StringBuilder(yhUid);
-            CookieParam bean = JSONUtil.toBean("{\"name\":\"user_id\",\"value\":\""+i+"\",\"domain\":\".yonghongtech.com\",\"path\":\"/\",\"expires\":1739131866,\"size\":12,\"httpOnly\":false,\"ecure\":false,\"session\":false,\"sameSite\":\"null\",\"priority\":\"Medium\",\"sameParty\":false,\"sourceScheme\":\"Secure\",\"sourcePort\":443,\"partitionKey\":null,\"partitionKeyOpaque\":false}", CookieParam.class);
-            page.setCookie(bean);
             System.out.println(page.cookies());
             Page card = browser.newPage();
-            card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + i + "&do=signlog&from=space");
+            String uid = getUid(page.content());
+            if(StrUtil.isBlank(uid)){
+                System.out.println("获取uid失败");
+            }
+            card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + uid + "&do=signlog&from=space");
             System.out.println(i);
             System.out.println(stringBuilder);
             System.out.println("进入打卡页面");
@@ -204,6 +209,19 @@ public class ApiUtil {
             System.out.println(cj.url());
         }
 
+    }
+
+    public static String getUid(String input){
+        Pattern pattern = Pattern.compile("UID: (\\d+)");
+        Matcher matcher = pattern.matcher(input);
+
+        if (matcher.find()) {
+            String uid = matcher.group(1);
+            return uid;
+        } else {
+            System.out.println("未找到匹配的UID");
+            return null;
+        }
     }
 
 
