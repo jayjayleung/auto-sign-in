@@ -170,7 +170,7 @@ public class ApiUtil {
             System.out.println(browser.userAgent());
             Page page = browser.newPage();
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
-            page.setExtraHTTPHeaders(commonHeaders);
+//            page.setExtraHTTPHeaders(commonHeaders);
             page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no");
             page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
             ElementHandle userName = page.$("input[name='username']");
@@ -183,6 +183,7 @@ public class ApiUtil {
             loginBtn.click();
             loginBtn.dispose();
             Thread.sleep(5000);
+            page.reload();
 //            if (Objects.nonNull(loginBtn)) {
 //                System.out.println("点击登录");
 //                loginBtn.click();
