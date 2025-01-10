@@ -169,19 +169,19 @@ public class ApiUtil {
             page.type("input[name='password']", yhPassword);
 //            page.click("input[name='loginsubmit']");
             ElementHandle loginBtn = page.$("button[name='loginsubmit']");
-            System.out.println(loginBtn);
+//            System.out.println(loginBtn);
 //            loginBtn.click();
             if (Objects.nonNull(loginBtn)) {
                 System.out.println("点击登录");
                 loginBtn.click();
             }
 
-            System.out.println(page.content());
+//            System.out.println(page.content());
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if(any.isPresent()) {
 //            page.waitForNavigation();
                 Thread.sleep(6000);
-                System.out.println("去打卡页面");
+                System.out.println("去打卡页面user_id:"+any.get().getValue());
                 //https://club.yonghongtech.com/home.php?mod=space&uid=50630&do=signlog&from=space
                 page.goTo("ttps://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
                 System.out.println(page.content());
@@ -199,7 +199,7 @@ public class ApiUtil {
             }
             Thread.sleep(15000);
             System.out.println("永洪抽奖完成");
-            System.out.println(page.content());
+//            System.out.println(page.content());
         }
 
     }
