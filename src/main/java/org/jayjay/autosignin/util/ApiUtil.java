@@ -183,21 +183,15 @@ public class ApiUtil {
             loginBtn.click();
             loginBtn.dispose();
             Thread.sleep(5000);
-            String i = Integer.valueOf(yhUid)+"";
-            StringBuilder stringBuilder = new StringBuilder(yhUid);
             System.out.println(page.cookies());
-            String uid = getUid(page.content());
-            if(StrUtil.isBlank(uid)){
-                System.out.println("获取uid失败");
-            }
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if (any.isPresent()) {
-                Page card = browser.newPage();
-                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
-                card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
+//                Page card = browser.newPage();
+//                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
+                page.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
                 System.out.println("进入打卡页面");
                 Thread.sleep(5000);
-                System.out.println(card.url());
+                System.out.println(page.url());
             }else {
                 System.out.println("获取cookie失败");
             }
