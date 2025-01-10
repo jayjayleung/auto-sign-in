@@ -40,9 +40,10 @@ jobs:
       run: mvn clean install --file pom.xml
 
     - name: run with java 
-      run: java -jar target/auto-sign-in-0.0.1-SNAPSHOT.jar -add-exports=java.base/sun.nio.ch=ALL-UNNAMED \
-          --add-opens=java.base/java.lang=ALL-UNNAMED \
-          --add-opens=java.base/java.lang.reflect=ALL-UNNAMED -\
-          -add-opens=java.base/java.io=ALL-UNNAMED \
-          --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED\
-          --add-opens java.base/java.util.concurrent=ALL-UNNAMED
+      run: java -jar target/auto-sign-in-0.0.1-SNAPSHOT.jar \
+            --add-exports=java.base/sun.nio.ch=ALL-UNNAMED \
+            --add-opens=java.base/java.lang=ALL-UNNAMED \
+            --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+            --add-opens=java.base/java.io=ALL-UNNAMED \ 
+            --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
+            --add-opens java.base/java.util.concurrent=ALL-UNNAMED
