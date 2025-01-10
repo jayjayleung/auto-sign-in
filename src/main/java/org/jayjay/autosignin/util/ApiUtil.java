@@ -160,7 +160,7 @@ public class ApiUtil {
         argList.add("--no-sandbox");
         argList.add("--disable-setuid-sandbox");
         argList.add("--disable-setuid-sandbox");
-        argList.add("user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'");
+//        argList.add("user_agent=''");
         LaunchOptions options = LaunchOptions.builder().args(argList).defaultViewport(null)
                 .headless(true)
                 .protocol(Protocol.CDP)
@@ -169,6 +169,7 @@ public class ApiUtil {
         try (Browser browser = Puppeteer.launch(options)) {
 
             Page page = browser.newPage();
+            page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36");
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
             page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no");
             ElementHandle userName = page.$("input[name='username']");
@@ -194,6 +195,7 @@ public class ApiUtil {
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if (any.isPresent()) {
                 Page card = browser.newPage();
+                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36");
                 card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
                 System.out.println("进入打卡页面");
                 Thread.sleep(5000);
@@ -203,6 +205,8 @@ public class ApiUtil {
             }
 //            System.out.println(page.content());
             Page cj = browser.newPage();
+
+            cj.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36");
             cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
             System.out.println("开始抽奖！");
