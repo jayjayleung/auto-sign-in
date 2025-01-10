@@ -8,6 +8,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.ruiyun.jvppeteer.api.core.Browser;
 import com.ruiyun.jvppeteer.api.core.ElementHandle;
+import com.ruiyun.jvppeteer.api.core.JSHandle;
 import com.ruiyun.jvppeteer.api.core.Page;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.Cookie;
@@ -187,11 +188,10 @@ public class ApiUtil {
                 Thread.sleep(5000);
                 System.out.println(page.url());
             }
-            ElementHandle punchRecord = page.$("//a[text()=\"打卡记录\"]')");
-
-            if (Objects.nonNull(punchRecord)) {
-                System.out.println("点击打卡");
-                punchRecord.click();
+            List<ElementHandle> list = page.$$(".nex_Home_Navtabs ul li a");
+            if(CollUtil.isNotEmpty(list)){
+                System.out.println("点击打卡记录");
+                list.get(3).click();
                 Thread.sleep(5000);
                 System.out.println(page.url());
             }
@@ -205,8 +205,8 @@ public class ApiUtil {
             }
             Thread.sleep(15000);
             System.out.println("永洪抽奖完成");
-            System.out.println(page.url());
 //            System.out.println(page.content());
+            System.out.println(page.url());
         }
 
     }
