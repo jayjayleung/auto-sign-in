@@ -178,18 +178,18 @@ public class ApiUtil {
                 loginBtn.click();
                 Thread.sleep(5000);
                 System.out.println(page.url());
+                System.out.println(page.cookies());
             }
 
             System.out.println(page.url());
-            ElementHandle avator = page.$(".hl_member_avator");
-            if (Objects.nonNull(avator)) {
-                System.out.println("点击头像");
-                avator.click();
-                Thread.sleep(5000);
-                System.out.println(page.url());
-            }
+            page.waitForSelector(".hl_member_avator");
+            System.out.println("点击头像");
+            page.click(".hl_member_avator");
+            Thread.sleep(5000);
+            System.out.println(page.url());
+            page.waitForSelector(".nex_Home_Navtabs");
             List<ElementHandle> list = page.$$(".nex_Home_Navtabs ul li a");
-            if(CollUtil.isNotEmpty(list)){
+            if (CollUtil.isNotEmpty(list)) {
                 System.out.println("点击打卡记录");
                 list.get(3).click();
                 Thread.sleep(5000);
