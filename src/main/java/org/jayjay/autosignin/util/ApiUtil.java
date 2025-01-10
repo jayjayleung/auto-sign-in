@@ -185,7 +185,9 @@ public class ApiUtil {
             Thread.sleep(5000);
             System.out.println(page.cookies());
             Page card = browser.newPage();
+            Integer i = Integer.valueOf(yhUid);
             card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + yhUid + "&do=signlog&from=space");
+            System.out.println(i);
             System.out.println("进入打卡页面");
             Thread.sleep(5000);
             System.out.println(card.url());
