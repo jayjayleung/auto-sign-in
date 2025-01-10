@@ -189,7 +189,7 @@ public class ApiUtil {
             System.out.println("进入打卡页面");
             Thread.sleep(5000);
             System.out.println(card.url());
-//            System.out.println(page.content());
+            System.out.println(card.content());
             Page cj = browser.newPage();
 
             cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
