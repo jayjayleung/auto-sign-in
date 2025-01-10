@@ -21,7 +21,6 @@ env:
   TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
   YH_USERNAME: ${{ secrets.YH_USERNAME }}
   YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
-  YH_UID: ${{ secrets.YH_UID }}
 
 jobs:
   build:
