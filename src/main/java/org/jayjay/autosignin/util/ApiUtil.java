@@ -187,8 +187,7 @@ public class ApiUtil {
                 Thread.sleep(5000);
                 System.out.println(page.url());
             }
-            ElementHandle punchRecord = page.$("//a[text()=\"打卡记录\"]')" +
-                    "[a]");
+            ElementHandle punchRecord = page.$("//a[text()=\"打卡记录\"]')");
 
             if (Objects.nonNull(punchRecord)) {
                 System.out.println("点击打卡");
