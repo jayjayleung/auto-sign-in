@@ -177,13 +177,15 @@ public class ApiUtil {
             }
 
             System.out.println(page.content());
-            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "uid".equalsIgnoreCase(cookie.getName())).findAny();
+            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if(any.isPresent()) {
 //            page.waitForNavigation();
                 Thread.sleep(6000);
                 System.out.println("去打卡页面");
-                page.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
+                //https://club.yonghongtech.com/home.php?mod=space&uid=50630&do=signlog&from=space
+                page.goTo("ttps://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
                 System.out.println(page.content());
+                System.out.println("打卡页面加载完毕");
 
             }
             Thread.sleep(6000);
