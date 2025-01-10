@@ -179,12 +179,12 @@ public class ApiUtil {
             loginBtn.click();
             loginBtn.dispose();
             Thread.sleep(5000);
-            CookieParam bean = JSONUtil.toBean("{name='user_id', value='"+yhUid+"', domain='.yonghongtech.com', path='/', expires=1739131866, size=12, httpOnly=false, secure=false, session=false, sameSite='null', priority='Medium', sameParty=false, sourceScheme='Secure', sourcePort=443, partitionKey=null, partitionKeyOpaque=false}", CookieParam.class);
+            String i = Integer.valueOf(yhUid)+"";
+            StringBuilder stringBuilder = new StringBuilder(yhUid);
+            CookieParam bean = JSONUtil.toBean("{\"name\":\"user_id\",\"value\":\""+i+"\",\"domain\":\".yonghongtech.com\",\"path\":\"/\",\"expires\":1739131866,\"size\":12,\"httpOnly\":false,\"ecure\":false,\"session\":false,\"sameSite\":\"null\",\"priority\":\"Medium\",\"sameParty\":false,\"sourceScheme\":\"Secure\",\"sourcePort\":443,\"partitionKey\":null,\"partitionKeyOpaque\":false}", CookieParam.class);
             page.setCookie(bean);
             System.out.println(page.cookies());
             Page card = browser.newPage();
-            Integer i = Integer.valueOf(yhUid);
-            StringBuilder stringBuilder = new StringBuilder(yhUid);
             card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + i + "&do=signlog&from=space");
             System.out.println(i);
             System.out.println(stringBuilder);
