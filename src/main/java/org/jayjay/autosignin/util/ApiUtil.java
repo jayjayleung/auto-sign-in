@@ -11,10 +11,7 @@ import com.ruiyun.jvppeteer.api.core.ElementHandle;
 import com.ruiyun.jvppeteer.api.core.JSHandle;
 import com.ruiyun.jvppeteer.api.core.Page;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
-import com.ruiyun.jvppeteer.cdp.entities.Cookie;
-import com.ruiyun.jvppeteer.cdp.entities.LaunchOptions;
-import com.ruiyun.jvppeteer.cdp.entities.Protocol;
-import com.ruiyun.jvppeteer.cdp.entities.RevisionInfo;
+import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import org.junit.Test;
 
@@ -152,7 +149,6 @@ public class ApiUtil {
         String yhUid = System.getenv("YH_UID");
         System.out.println("yhUsername: " + yhUsername);
         System.out.println("yhPassword: " + yhPassword);
-
         //自动下载，第一次下载后不会再下载
         RevisionInfo revisionInfo = Puppeteer.downloadBrowser();
         System.out.println("revisionInfo: " + revisionInfo);
@@ -183,11 +179,13 @@ public class ApiUtil {
             loginBtn.click();
             loginBtn.dispose();
             Thread.sleep(5000);
+            CookieParam bean = JSONUtil.toBean("{name='user_id', value='"+yhUid+"', domain='.yonghongtech.com', path='/', expires=1739131866, size=12, httpOnly=false, secure=false, session=false, sameSite='null', priority='Medium', sameParty=false, sourceScheme='Secure', sourcePort=443, partitionKey=null, partitionKeyOpaque=false}", CookieParam.class);
+            page.setCookie(bean);
             System.out.println(page.cookies());
             Page card = browser.newPage();
             Integer i = Integer.valueOf(yhUid);
             StringBuilder stringBuilder = new StringBuilder(yhUid);
-            card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + stringBuilder + "&do=signlog&from=space");
+            card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + i + "&do=signlog&from=space");
             System.out.println(i);
             System.out.println(stringBuilder);
             System.out.println("进入打卡页面");
