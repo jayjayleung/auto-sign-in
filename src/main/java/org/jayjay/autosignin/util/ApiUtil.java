@@ -1,5 +1,6 @@
 package org.jayjay.autosignin.util;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
@@ -174,21 +175,26 @@ public class ApiUtil {
             if (Objects.nonNull(loginBtn)) {
                 System.out.println("点击登录");
                 loginBtn.click();
+                Thread.sleep(5000);
+                System.out.println(page.url());
             }
 
-//            System.out.println(page.content());
-            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
-            if(any.isPresent()) {
-//            page.waitForNavigation();
-                Thread.sleep(6000);
-                System.out.println("去打卡页面user_id:"+any.get().getValue());
-                //https://club.yonghongtech.com/home.php?mod=space&uid=50630&do=signlog&from=space
-                page.goTo("ttps://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
-                System.out.println(page.content());
-                System.out.println("打卡页面加载完毕");
-
+            System.out.println(page.url());
+            ElementHandle avator = page.$(".hl_member_avator");
+            if (Objects.nonNull(avator)) {
+                System.out.println("点击头像");
+                avator.click();
+                Thread.sleep(5000);
+                System.out.println(page.url());
             }
-            Thread.sleep(6000);
+            ElementHandle punchRecord = page.$("//a[contains(text(), \"打卡\")]");
+
+            if (Objects.nonNull(punchRecord)) {
+                System.out.println("点击打卡");
+                punchRecord.click();
+                Thread.sleep(5000);
+                System.out.println(page.url());
+            }
 //            System.out.println(page.content());
             page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
@@ -199,6 +205,7 @@ public class ApiUtil {
             }
             Thread.sleep(15000);
             System.out.println("永洪抽奖完成");
+            System.out.println(page.url());
 //            System.out.println(page.content());
         }
 
