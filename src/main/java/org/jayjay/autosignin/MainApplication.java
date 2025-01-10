@@ -10,8 +10,8 @@ public class MainApplication {
         String test = System.getenv("TEST");
         System.out.println("test:"+test);
         System.out.println("开始签到。。。");
-//        ApiUtil.checkInModb();
-//        ApiUtil.checkInTidb();
+        ApiUtil.checkInModb();
+        ApiUtil.checkInTidb();
         System.out.println("永洪签到start");
         ApiUtil.checkInYongHong();
         System.out.println("永洪签到end");

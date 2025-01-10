@@ -30,9 +30,9 @@ public class ApiUtil {
 
 
     @Test
-    public void test1() {
+    public void test1() throws Exception {
 //        System.out.println(checkInModb());
-        System.out.println(checkInTidb());
+        checkInYongHong();
     }
 
     public static Map<String, String> commonHeaders = new HashMap<>();
@@ -178,35 +178,27 @@ public class ApiUtil {
                 loginBtn.click();
                 Thread.sleep(5000);
                 System.out.println(page.url());
-                System.out.println(page.cookies());
+//                System.out.println(page.cookies());
             }
 
-            System.out.println(page.url());
-            page.waitForSelector(".hl_member_avator");
-            System.out.println("点击头像");
-            page.click(".hl_member_avator");
-            Thread.sleep(5000);
-            System.out.println(page.url());
-            page.waitForSelector(".nex_Home_Navtabs");
-            List<ElementHandle> list = page.$$(".nex_Home_Navtabs ul li a");
-            if (CollUtil.isNotEmpty(list)) {
-                System.out.println("点击打卡记录");
-                list.get(3).click();
+            Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
+            if (any.isPresent()) {
+                Page card = browser.newPage();
+                card.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space");
+                System.out.println("进入打卡页面");
                 Thread.sleep(5000);
-                System.out.println(page.url());
+                System.out.println(card.url());
             }
 //            System.out.println(page.content());
-            page.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
+            Page cj = browser.newPage();
+            cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
 //            page.waitForNavigation();
-            ElementHandle startBtn = page.waitForSelector("#startbtn");
-            if (Objects.nonNull(startBtn)) {
-                System.out.println("开始抽奖！");
-                startBtn.click();
-            }
+            System.out.println("开始抽奖！");
+            cj.click("#startbtn");
             Thread.sleep(15000);
             System.out.println("永洪抽奖完成");
 //            System.out.println(page.content());
-            System.out.println(page.url());
+            System.out.println(cj.url());
         }
 
     }
