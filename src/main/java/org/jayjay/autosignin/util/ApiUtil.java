@@ -199,9 +199,10 @@ public class ApiUtil {
                 System.out.println("获取cookie失败");
             }
             Page cj = browser.newPage();
-
+            
             cj.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
             cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
+            Thread.sleep(5000);
 //            page.waitForNavigation();
             System.out.println("开始抽奖！");
             cj.click("#startbtn");
