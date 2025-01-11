@@ -138,6 +138,7 @@ public class ApiUtil {
         String body1 = HttpRequest.post("https://tidb.net/api/points/daily-checkin")
                 .cookie(res.getCookies())
                 .headerMap(getTidbCheckInHeader(), true).header("x-csrftoken", res.getCookieValue("csrftoken")).execute().body();
+        System.out.println(body1);
         System.out.println(toJSON(body1).getStr("detail"));
         return toJSON(body1).toString();
     }
