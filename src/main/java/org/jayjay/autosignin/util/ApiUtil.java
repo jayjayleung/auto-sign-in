@@ -183,7 +183,7 @@ public class ApiUtil {
             System.out.println("点击登录");
             loginBtn.click();
             loginBtn.dispose();
-            Thread.sleep(5000);
+            Thread.sleep(3000);
             System.out.println(page.cookies());
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if (any.isPresent()) {
@@ -194,8 +194,8 @@ public class ApiUtil {
 //                System.out.println("card_url:"+url);
 //                page.goTo(url);
 //                System.out.println("进入打卡页面");
-                Thread.sleep(5000);
                 System.out.println(page.url());
+                Thread.sleep(3000);
             }else {
                 System.out.println("获取cookie失败");
             }
