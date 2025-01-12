@@ -190,10 +190,10 @@ public class ApiUtil {
                 System.out.println("获取cookie成功:"+any.get().getValue());
 //                Page card = browser.newPage();
 //                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
-                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
-                System.out.println("card_url:"+url);
-                page.goTo(url);
-                System.out.println("进入打卡页面");
+//                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
+//                System.out.println("card_url:"+url);
+//                page.goTo(url);
+//                System.out.println("进入打卡页面");
                 Thread.sleep(5000);
                 System.out.println(page.url());
             }else {
