@@ -7,6 +7,7 @@ import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
+import org.junit.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -21,6 +22,12 @@ public class YongHoneCheckInTask extends CheckInTask{
     String loginUrl = "https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no";
     String checkInUrl = "https://club.yonghongtech.com/home.php?mod=space&uid=${user_id}&do=signlog&from=space";
     String cjUrl = "https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3";
+
+
+    @Test
+    public void testRun(){
+        run();
+    }
     @Override
     public CheckInTask run(){
         while (!success && retryCount < maxRetries) {
@@ -65,15 +72,17 @@ public class YongHoneCheckInTask extends CheckInTask{
                 System.out.println("点击登录");
                 loginBtn.click();
                 loginBtn.dispose();
-                Thread.sleep(3000);
+                Thread.sleep(5000);
                 System.out.println(page.cookies());
                 Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
                 if (any.isPresent()) {
                     String uid = any.get().getValue();
                     System.out.println("获取cookie成功:" + uid);
                     addMessage("UID：", uid);
-                    addMessage(lineMsg("用户名:").append(page.evaluate("document.querySelector(\"a[title='个人设置']\").innerText.replaceAll('\\n','')")));
-                    addMessage(lineMsg("洪豆:").append(page.evaluate("document.querySelector(\".hl_member_in_status\").innerText.replaceAll('\\n','')")));
+                    // document.querySelector("a[title='个人设置'].innerText")
+                    Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
+                    addMessage(lineMsg("用户名:").append(evaluate));
+                    addMessage(lineMsg("洪豆:").append(page.$eval(".hl_member_in_status", "ele=>ele.innerText.replaceAll('\\n','')")));
 //                Page card = browser.newPage();
 //                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
@@ -95,10 +104,11 @@ public class YongHoneCheckInTask extends CheckInTask{
                 cj.click("#startbtn");
                 cj.waitForSelector("#main_messaqge");
 //            Thread.sleep(15000);
-                System.out.println(cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
-                addMessage(String.valueOf(cj.evaluate("document.querySelector('#main_messaqge div p').innerText")));
+                System.out.println(cj.$eval("#main_messaqge div p", "ele=>ele.innerText"));
+                addMessage(String.valueOf(cj.$eval("#main_messaqge div p", "ele=>ele.innerText")));
                 System.out.println("永洪抽奖完成");
                 System.out.println(cj.url());
+                success = true;
             } catch (Exception e) {
                 e.printStackTrace();
                 // 处理异常
