@@ -13,13 +13,13 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 @Data
-public class YongHoneCheckInTask implements CheckInTask{
+public class YongHoneCheckInTask extends CheckInTask{
     String loginUrl = "https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no";
     String checkInUrl = "https://club.yonghongtech.com/home.php?mod=space&uid=${user_id}&do=signlog&from=space";
     String cjUrl = "https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3";
     @Override
-    public StringBuilder run(){
-        message.append("yonghong 签到");
+    public CheckInTask run(){
+        addMessage("yonghong 签到");
         System.out.println("yonghong 签到任务开始");
         String yhUsername = System.getenv("YH_USERNAME");
         String yhPassword = System.getenv("YH_PASSWORD");
@@ -66,10 +66,9 @@ public class YongHoneCheckInTask implements CheckInTask{
             if (any.isPresent()) {
                 String uid = any.get().getValue();
                 System.out.println("获取cookie成功:"+uid);
-                message.append("UID:").append(uid).append(lineEnd);
-
-                message.append("用户名:").append(page.evaluate("document.querySelector(\"a[title='个人设置']\").innerText.replaceAll('\\n','')")).append(lineEnd);
-                message.append("洪豆:").append(page.evaluate("document.querySelector(\".hl_member_in_status\").innerText.replaceAll('\\n','')")).append(lineEnd);
+                addMessage("UID：",uid);
+                addMessage(lineMsg("用户名:").append(page.evaluate("document.querySelector(\"a[title='个人设置']\").innerText.replaceAll('\\n','')")));
+                addMessage(lineMsg("洪豆:").append(page.evaluate("document.querySelector(\".hl_member_in_status\").innerText.replaceAll('\\n','')")));
 //                Page card = browser.newPage();
 //                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
@@ -92,12 +91,13 @@ public class YongHoneCheckInTask implements CheckInTask{
             cj.waitForSelector("#main_messaqge");
 //            Thread.sleep(15000);
             System.out.println(cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
-            message.append(cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
+            addMessage(String.valueOf(cj.evaluate("document.querySelector('#main_messaqge div p').innerText")));
             System.out.println("永洪抽奖完成");
             System.out.println(cj.url());
         }catch (Exception e){
             e.printStackTrace();
         }
-        return message;
+
+        return this;
     }
 }
