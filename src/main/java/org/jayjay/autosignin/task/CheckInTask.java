@@ -65,7 +65,7 @@ public abstract class CheckInTask {
     public void addMessage(String...message) {
         StringBuilder sb = new StringBuilder();
         for (String s : message) {
-            sb.append(sb);
+            sb.append(s);
         }
         listMessage.add(sb);
     }
