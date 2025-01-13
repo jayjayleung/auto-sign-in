@@ -1,5 +1,6 @@
 package org.jayjay.autosignin.task;
 
+import cn.hutool.core.util.StrUtil;
 import com.ruiyun.jvppeteer.api.core.Browser;
 import com.ruiyun.jvppeteer.api.core.ElementHandle;
 import com.ruiyun.jvppeteer.api.core.Page;
@@ -8,6 +9,9 @@ import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
 import lombok.var;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.select.Elements;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -27,7 +31,7 @@ public class YongHoneCheckInTask extends CheckInTask{
 
     @Test
     public void testRun(){
-        run();
+//        run();
     }
     @Override
     public CheckInTask run(){
@@ -38,6 +42,8 @@ public class YongHoneCheckInTask extends CheckInTask{
             String yhPassword = System.getenv("YH_PASSWORD");
             System.out.println("yhUsername: " + yhUsername);
             System.out.println("yhPassword: " + yhPassword);
+            yhUsername = "15913213996";
+            yhPassword = "sjie19950901.";
             //自动下载，第一次下载后不会再下载
             RevisionInfo revisionInfo = null;
             try {
@@ -81,6 +87,18 @@ public class YongHoneCheckInTask extends CheckInTask{
                     System.out.println("获取cookie成功:" + uid);
                     System.out.println(page.url());
                     addMessage("UID：", uid);
+                    String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
+                    page.goTo(url);
+                    Thread.sleep(5000);
+                    System.out.println(page.url());
+                    Document document = Jsoup.parse(page.content());
+                    Elements me = document.select(".nex_Home_intel h5");
+                    if(me !=null){
+                        String user = me.text().replaceAll(lineEnd, "");
+                        System.out.println(user);
+                        addMessage(lineMsg("用户名:").append(user));
+                    }
+
                     // document.querySelector("a[title='个人设置'].innerText")
                     //有bug,老是找不到节点
 //                    page.hover(".hl_member_avator");
@@ -103,6 +121,16 @@ public class YongHoneCheckInTask extends CheckInTask{
                 cj.setUserAgent(userAgent);
                 cj.goTo(cjUrl);
                 Thread.sleep(5000);
+
+                Document document = Jsoup.parse(cj.content());
+                Elements point = document.select("#ct div ul li:eq(2) font:eq(3)");
+                if(point !=null){
+                    String pointStr = point.text();
+                    if(StrUtil.isBlank(pointStr)) {
+                        System.out.println(pointStr);
+                        addMessage(lineMsg("洪豆:").append(pointStr));
+                    }
+                }
 //            page.waitForNavigation();
                 System.out.println("开始抽奖！");
                 cj.click("#startbtn");

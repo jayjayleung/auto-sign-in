@@ -62,7 +62,9 @@ public class MessageUtil {
         StringBuilder message = new StringBuilder();
         messageList.forEach(sb -> message.append(sb).append(CheckInTask.lineEnd));
         body.set("content", message);
-        HttpResponse execute = HttpRequest.post("https://www.pushplus.plus/send").body(body.toString()).execute();
+        HttpResponse execute = HttpRequest.post("https://www.pushplus.plus/send")
+                .header("Content-Type","application/json")
+                .body(body.toString()).execute();
         System.out.println(execute.body());
         System.out.println("发送pushplus成功");
     }
@@ -80,7 +82,9 @@ public class MessageUtil {
         StringBuilder message = new StringBuilder();
         messageList.forEach(sb -> message.append(sb).append(CheckInTask.lineEnd));
         body.set("desp", message);
-        HttpResponse execute = HttpRequest.post(url).body(body.toString()).execute();
+        HttpResponse execute = HttpRequest.post(url)
+                .header("Content-Type","application/json")
+                .body(body.toString()).execute();
         System.out.println(execute.body());
         System.out.println("发送serverchan成功");
     }
