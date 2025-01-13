@@ -82,18 +82,19 @@ public class YongHoneCheckInTask extends CheckInTask{
                     System.out.println(page.url());
                     addMessage("UID：", uid);
                     // document.querySelector("a[title='个人设置'].innerText")
-                    page.hover(".hl_member_avator");
-                    page.waitForSelector("a[title='个人设置']");
-                    Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
-                    addMessage(lineMsg("用户名:").append(evaluate));
-                    addMessage(lineMsg("洪豆:").append(page.$eval(".hl_member_in_status", "ele=>ele.innerText.replaceAll('\\n','')")));
+                    //有bug,老是找不到节点
+//                    page.hover(".hl_member_avator");
+//                    page.waitForSelector("a[title='个人设置']");
+//                    Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
+//                    addMessage(lineMsg("用户名:").append(evaluate));
+//                    addMessage(lineMsg("洪豆:").append(page.$eval(".hl_member_in_status", "ele=>ele.innerText.replaceAll('\\n','')")));
 //                Page card = browser.newPage();
 //                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
 //                System.out.println("card_url:"+url);
 //                page.goTo(url);
 //                System.out.println("进入打卡页面");
-                    Thread.sleep(3000);
+                    Thread.sleep(1000);
                 } else {
                     System.out.println("获取cookie失败");
                 }
