@@ -66,7 +66,7 @@ public class TiDbCheckInTask implements CheckInTask {
         System.out.println(checkInBody);
         message.append("签到:").append(checkInBody.getStr("detail"));
         JSONObject data = checkInBody.getJSONObject("data");
-        if (data.containsKey("points")) {
+        if (data!=null && data.containsKey("points")) {
             message.append("，积分:").append(data.getStr("points"));
             if (data.containsKey("tomorrow_points")) {
                 message.append("，明天积分:").append(data.getStr("tomorrow_points"));

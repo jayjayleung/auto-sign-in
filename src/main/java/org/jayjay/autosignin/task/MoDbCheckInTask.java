@@ -66,7 +66,7 @@ public class MoDbCheckInTask implements CheckInTask {
         message.append(str).append(lineEnd);
         if(checkInBody.containsKey("operateCallBackObj")){
             JSONObject operateCallBackObj = checkInBody.getJSONObject("operateCallBackObj");
-            if(operateCallBackObj.containsKey("point")){
+            if(operateCallBackObj!=null && operateCallBackObj.containsKey("point")){
                 message.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(lineEnd);
             }
         }
