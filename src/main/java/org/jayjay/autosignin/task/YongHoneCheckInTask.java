@@ -115,7 +115,6 @@ public class YongHoneCheckInTask extends CheckInTask{
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
-                listMessage.clear();
                 // 处理异常
                 retryCount++;
                 sleep(delay);
@@ -124,6 +123,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                 if(retryCount>=maxRetries){
                     addMessage("永洪签到失败，请查看日志");
                 }
+                listMessage.clear();
             }
         }
 
