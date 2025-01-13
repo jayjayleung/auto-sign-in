@@ -79,6 +79,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                 if (any.isPresent()) {
                     String uid = any.get().getValue();
                     System.out.println("获取cookie成功:" + uid);
+                    System.out.println(page.url());
                     addMessage("UID：", uid);
                     // document.querySelector("a[title='个人设置'].innerText")
                     Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
@@ -90,7 +91,6 @@ public class YongHoneCheckInTask extends CheckInTask{
 //                System.out.println("card_url:"+url);
 //                page.goTo(url);
 //                System.out.println("进入打卡页面");
-                    System.out.println(page.url());
                     Thread.sleep(3000);
                 } else {
                     System.out.println("获取cookie失败");
