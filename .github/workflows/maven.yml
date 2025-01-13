@@ -15,13 +15,17 @@ on:
   workflow_dispatch:
 
 env:
-  TEST: ${{ secrets.TEST }}
   MODB_USERNAME: ${{ secrets.MODB_USERNAME }}
   MODB_PASSWORD: ${{ secrets.MODB_PASSWORD }}
   TIDB_USERNAME: ${{ secrets.TIDB_USERNAME }}
   TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
   YH_USERNAME: ${{ secrets.YH_USERNAME }}
   YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
+  EMAIL_USER: ${{ secrets.EMAIL_USER }}
+  EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+  EMAIL_TO: ${{ secrets.EMAIL_TO }}
+  PUSH_PLUS_TOKEN: ${{ secrets.PUSH_PLUS_TOKEN }}
+  SERVER_CHAN_TOKEN: ${{ secrets.SERVER_CHAN_TOKEN }}
 
 jobs:
   build:
