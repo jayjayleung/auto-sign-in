@@ -6,6 +6,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.Test;
 
 import java.net.HttpCookie;
 import java.util.List;
@@ -15,7 +16,13 @@ import java.util.Map;
 public class MoDbCheckInTask extends CheckInTask {
     String loginUrl = "https://www.modb.pro/api/login";
     String checkInUrl = "https://www.modb.pro/api/user/checkIn";
-    String userUrl = "https://www.modb.pro/api/follows/detail";
+    String userUrl = "https://www.modb.pro/api/user/detail";
+
+
+    @Test()
+    public void testRun(){
+        run();
+    }
 
     @Override
     public CheckInTask run() {
@@ -45,7 +52,7 @@ public class MoDbCheckInTask extends CheckInTask {
         //查询用户信息
         HttpResponse userRes = HttpRequest.get(userUrl)
                 .cookie(cookies)
-                .headerMap(headers, true).execute();
+                .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
         if(userRes.isOk()) {
             JSONObject userBody = toJSON(userRes.body());
             System.out.println(userBody);
@@ -85,6 +92,14 @@ public class MoDbCheckInTask extends CheckInTask {
         headers.put("Host", "www.modb.pro");
         headers.put("Origin", "https://www.modb.pro");
         headers.put("Referer", "https://www.modb.pro/login?redirect=%2ForderList");
+        return headers;
+    }
+    public Map<String, String> userHeaders(String token) {
+        Map<String, String> headers = commonHeaders();
+        headers.put("Host", "www.modb.pro");
+        headers.put("Origin", "https://www.modb.pro");
+        headers.put("Authorization", token);
+//        headers.put("Referer", "https://www.modb.pro/login?redirect=%2ForderList");
         return headers;
     }
 }
