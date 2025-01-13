@@ -82,7 +82,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                     System.out.println(page.url());
                     addMessage("UID：", uid);
                     // document.querySelector("a[title='个人设置'].innerText")
-                    page.hover("#hl_member_avator");
+                    page.hover(".hl_member_avator");
                     page.waitForSelector("a[title='个人设置']");
                     Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
                     addMessage(lineMsg("用户名:").append(evaluate));
