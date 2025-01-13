@@ -7,6 +7,7 @@ import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
+import lombok.var;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -104,8 +105,9 @@ public class YongHoneCheckInTask extends CheckInTask{
                 cj.click("#startbtn");
                 cj.waitForSelector("#main_messaqge");
 //            Thread.sleep(15000);
-                System.out.println(cj.$eval("#main_messaqge div p", "ele=>ele.innerText"));
-                addMessage(String.valueOf(cj.$eval("#main_messaqge div p", "ele=>ele.innerText")));
+                String cjMsg = cj.$eval("#main_messaqge div p", "ele=>ele.innerText").toString();
+                System.out.println(cjMsg);
+                addMessage(cjMsg);
                 System.out.println("永洪抽奖完成");
                 System.out.println(cj.url());
                 success = true;
