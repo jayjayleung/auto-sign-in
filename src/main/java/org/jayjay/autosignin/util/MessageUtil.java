@@ -30,7 +30,9 @@ public class MessageUtil {
 
 
     public void sendEmail(List<StringBuilder> messageList){
+        System.out.println("发送邮件");
         if(StrUtil.isBlank(EMAIL_USER) || StrUtil.isBlank(EMAIL_PASS) || StrUtil.isBlank(EMAIL_TO)){
+            System.out.println("发送邮件失败");
             return;
         }
 
@@ -45,10 +47,13 @@ public class MessageUtil {
         messageList.forEach(sb -> message.append("<p>").append(sb).append("</p>"));
         MailUtil.send(account, CollUtil.toList(EMAIL_TO.split(",")),
                 "签到结果", message.toString(), true);
+        System.out.println("发送邮件成功");
     }
 
     public void sendPushPlus(List<StringBuilder> messageList){
+        System.out.println("发送pushplus");
         if(StrUtil.isBlank(PUSH_PLUS_TOKEN)){
+            System.out.println("发送pushplus失败");
             return;
         }
         JSONObject body = new JSONObject();
@@ -59,10 +64,13 @@ public class MessageUtil {
         body.set("content", message);
         HttpResponse execute = HttpRequest.post("https://www.pushplus.plus/send").body(body.toString()).execute();
         System.out.println(execute.body());
+        System.out.println("发送pushplus成功");
     }
 
     public void sendServerChan(List<StringBuilder> messageList){
+        System.out.println("发送serverchan");
         if(StrUtil.isBlank(SERVER_CHAN_TOKEN)){
+            System.out.println("发送serverchan失败");
             return;
         }
         String url = "https://sctapi.ftqq.com/" + SERVER_CHAN_TOKEN + ".send";
@@ -74,6 +82,7 @@ public class MessageUtil {
         body.set("desp", message);
         HttpResponse execute = HttpRequest.post(url).body(body.toString()).execute();
         System.out.println(execute.body());
+        System.out.println("发送serverchan成功");
     }
 
     public String extractDomain() {
