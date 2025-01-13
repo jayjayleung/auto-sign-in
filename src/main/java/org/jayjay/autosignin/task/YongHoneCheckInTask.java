@@ -115,7 +115,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
-                message.setLength(0);
+                listMessage.clear();
                 // 处理异常
                 retryCount++;
                 sleep(delay);
