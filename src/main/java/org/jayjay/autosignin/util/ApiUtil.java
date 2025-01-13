@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
 public class ApiUtil {
 
 
+
     @Test
     public void test1() throws Exception {
 //        System.out.println(checkInModb());
@@ -207,7 +208,9 @@ public class ApiUtil {
 //            page.waitForNavigation();
             System.out.println("开始抽奖！");
             cj.click("#startbtn");
-            Thread.sleep(15000);
+            cj.waitForSelector("#main_messaqge");
+//            Thread.sleep(15000);
+            System.out.println(cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
             System.out.println("永洪抽奖完成");
 //            System.out.println(page.content());
             System.out.println(cj.url());
