@@ -53,7 +53,6 @@ public class MessageUtil {
     }
 
     public void sendPushPlus(List<StringBuilder> messageList){
-        System.out.println("发送pushplus");
         if(StrUtil.isBlank(PUSH_PLUS_TOKEN)){
             System.out.println("发送pushplus失败");
             return;
@@ -64,7 +63,8 @@ public class MessageUtil {
         StringBuilder message = new StringBuilder();
         messageList.forEach(sb -> message.append(sb).append(CheckInTask.lineEnd));
         body.set("content", message);
-        HttpResponse execute = HttpRequest.post("https://www.pushplus.plus/send")
+        System.out.println("发送pushplus");
+        HttpResponse execute = HttpRequest.post("http://www.pushplus.plus/send")
                 .header("Content-Type","application/json")
                 .body(body.toString()).execute();
         System.out.println(execute.body());
@@ -72,7 +72,6 @@ public class MessageUtil {
     }
 
     public void sendServerChan(List<StringBuilder> messageList){
-        System.out.println("发送serverchan");
         if(StrUtil.isBlank(SERVER_CHAN_TOKEN)){
             System.out.println("发送serverchan失败");
             return;
@@ -84,6 +83,7 @@ public class MessageUtil {
         StringBuilder message = new StringBuilder();
         messageList.forEach(sb -> message.append(sb).append(CheckInTask.lineEnd));
         body.set("desp", message);
+        System.out.println("发送serverchan");
         HttpResponse execute = HttpRequest.post(url)
                 .header("Content-Type","application/json")
                 .body(body.toString()).execute();
