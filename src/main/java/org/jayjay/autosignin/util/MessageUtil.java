@@ -18,8 +18,8 @@ public class MessageUtil {
     public static final String lineEnd = "\n";
     public static final String dbLineEnd = "\n\n";
 
-    public String EMAIL_USER = System.getenv("EMAIL_USER");
-    public String EMAIL_PASS = System.getenv("EMAIL_PASS");
+    public String EMAIL_USERNAME = System.getenv("EMAIL_USERNAME");
+    public String EMAIL_PASSWORD = System.getenv("EMAIL_PASSWORD");
     public String EMAIL_TO = System.getenv("EMAIL_TO");
     public String PUSH_PLUS_TOKEN = System.getenv("PUSH_PLUS_TOKEN");
     public String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
@@ -35,7 +35,7 @@ public class MessageUtil {
 
     public void sendEmail(List<MessageList> messageList){
         System.out.println("发送邮件");
-        if(StrUtil.isBlank(EMAIL_USER) || StrUtil.isBlank(EMAIL_PASS) || StrUtil.isBlank(EMAIL_TO)){
+        if(StrUtil.isBlank(EMAIL_USERNAME) || StrUtil.isBlank(EMAIL_PASSWORD) || StrUtil.isBlank(EMAIL_TO)){
             System.out.println("发送邮件失败");
             return;
         }
@@ -44,9 +44,9 @@ public class MessageUtil {
         account.setHost("smtp."+extractDomain());
         account.setPort(25);
         account.setAuth(true);
-        account.setFrom(EMAIL_USER);
-        account.setUser(EMAIL_USER);
-        account.setPass(EMAIL_PASS);
+        account.setFrom(EMAIL_USERNAME);
+        account.setUser(EMAIL_USERNAME);
+        account.setPass(EMAIL_PASSWORD);
         StringBuilder message = toHtml(messageList);
 //        System.out.println(message);
         MailUtil.send(account, CollUtil.toList(EMAIL_TO.split(",")),
@@ -95,10 +95,10 @@ public class MessageUtil {
     }
 
     public String extractDomain() {
-        if (EMAIL_USER == null) {
+        if (EMAIL_USERNAME == null) {
             return null;
         }
-        return ReUtil.getGroup1("@([^@]+)$", EMAIL_USER);
+        return ReUtil.getGroup1("@([^@]+)$", EMAIL_USERNAME);
     }
 
 
