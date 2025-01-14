@@ -1,7 +1,6 @@
 package org.jayjay.autosignin.util;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.thread.ThreadUtil;
 import cn.hutool.core.util.ArrayUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
@@ -14,7 +13,6 @@ import org.jayjay.autosignin.task.CheckInTask;
 import org.junit.Test;
 
 import java.util.List;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 public class MessageUtil {
 
@@ -25,10 +23,9 @@ public class MessageUtil {
     public String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
 
     public void sendMsg(List<StringBuilder> messageList){
-        ScheduledThreadPoolExecutor scheduledExecutor = ThreadUtil.createScheduledExecutor(10);
-        scheduledExecutor.execute(()->sendEmail(messageList));
-        scheduledExecutor.execute(()->sendPushPlus(messageList));
-        scheduledExecutor.execute(()->sendServerChan(messageList));
+        sendEmail(messageList);
+        sendPushPlus(messageList);
+        sendServerChan(messageList);
 
     }
 
