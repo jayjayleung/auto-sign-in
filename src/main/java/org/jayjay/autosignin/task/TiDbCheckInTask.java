@@ -6,6 +6,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.jayjay.autosignin.entity.MessageList;
 
 import java.net.HttpCookie;
 import java.util.List;
@@ -19,11 +20,13 @@ public class TiDbCheckInTask extends CheckInTask {
     String checkInUrl = "https://tidb.net/api/points/daily-checkin";
     String userUrl = "https://tidb.net/api/me";
     String pointsUrl = "https://tidb.net/api/points/me";
-
+    @Override
+    public MessageList messageList() {
+        return new MessageList("Tidb 签到", listMessage);
+    }
 
     @Override
     public CheckInTask run() {
-        addMessage("TiDb 签到");
         System.out.println("TiDb 签到任务开始");
         System.out.println("开始登录...");
         String tidbUsername = System.getenv("TIDB_USERNAME");
@@ -70,15 +73,15 @@ public class TiDbCheckInTask extends CheckInTask {
         JSONObject checkInBody = toJSON(checkInRes.body());
         System.out.println(checkInBody);
         StringBuilder checkInMsg = lineMsg("签到:").append(checkInBody.getStr("detail"));
-        addMessage("签到：",checkInBody.getStr("detail"));
+        addMessage(checkInMsg);
         JSONObject data = checkInBody.getJSONObject("data");
         if (data!=null && data.containsKey("points")) {
-            checkInMsg.append("，积分:").append(data.getStr("points"));
+            StringBuilder points = lineMsg("积分:").append(data.getStr("points"));
             if (data.containsKey("tomorrow_points")) {
-                checkInMsg.append("，明天积分:").append(data.getStr("tomorrow_points"));
+                points.append("，明天积分:").append(data.getStr("tomorrow_points"));
             }
+            addMessage(points);
         }
-        addMessage(checkInMsg);
         System.out.println("TiDb 签到任务结束...");
         return this;
     }

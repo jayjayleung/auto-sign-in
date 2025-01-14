@@ -9,6 +9,8 @@ import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.util.MessageUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
@@ -29,6 +31,10 @@ public class YongHoneCheckInTask extends CheckInTask{
     String checkInUrl = "https://club.yonghongtech.com/home.php?mod=space&uid=${user_id}&do=signlog&from=space";
     String cjUrl = "https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3";
 
+    @Override
+    public MessageList messageList() {
+        return new MessageList("YongHong 签到", listMessage);
+    }
 
     @Test
     public void testRun(){
@@ -38,7 +44,6 @@ public class YongHoneCheckInTask extends CheckInTask{
     public CheckInTask run(){
         //开启重试，有时候网页打开失败
         while (!success && retryCount < maxRetries) {
-            addMessage("yonghong 签到");
             System.out.println("yonghong 签到任务开始");
             String yhUsername = System.getenv("YH_USERNAME");
             String yhPassword = System.getenv("YH_PASSWORD");
@@ -94,7 +99,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                     Document document = Jsoup.parse(page.content());
                     Elements me = document.select(".nex_Home_intel h5");
                     if(me !=null){
-                        String user = me.text().replaceAll(lineEnd, "");
+                        String user = me.text().replaceAll(MessageUtil.lineEnd, "");
                         System.out.println(user);
                         addMessage(lineMsg("用户名:").append(user));
                     }

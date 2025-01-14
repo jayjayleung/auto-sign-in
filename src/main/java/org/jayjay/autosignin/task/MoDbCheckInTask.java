@@ -7,6 +7,8 @@ import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
+import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.util.MessageUtil;
 import org.junit.Test;
 
 import java.net.HttpCookie;
@@ -19,6 +21,10 @@ public class MoDbCheckInTask extends CheckInTask {
     String checkInUrl = "https://www.modb.pro/api/user/checkIn";
     String userUrl = "https://www.modb.pro/api/user/detail";
 
+    @Override
+    public MessageList messageList() {
+        return new MessageList("Modb 签到", listMessage);
+    }
 
     @Test()
     public void testRun(){
@@ -27,7 +33,6 @@ public class MoDbCheckInTask extends CheckInTask {
 
     @Override
     public CheckInTask run() {
-        addMessage("Modb 签到");
         System.out.println("Modb 签到任务开始");
         System.out.println("开始登录...");
         String modbUsername = System.getenv("MODB_USERNAME");
@@ -80,7 +85,7 @@ public class MoDbCheckInTask extends CheckInTask {
         if(checkInBody.containsKey("operateCallBackObj")){
             JSONObject operateCallBackObj = checkInBody.getJSONObject("operateCallBackObj");
             if(operateCallBackObj!=null && operateCallBackObj.containsKey("point")){
-                checkInMsg.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(lineEnd);
+                checkInMsg.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(MessageUtil.lineEnd);
             }
         }
         addMessage(checkInMsg);

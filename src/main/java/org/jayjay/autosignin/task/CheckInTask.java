@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
+import org.jayjay.autosignin.entity.MessageList;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -13,7 +14,6 @@ import java.util.Map;
 
 @Data
 public abstract class CheckInTask {
-    public static final String lineEnd = "\n";
 
     static final String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82";
 
@@ -21,10 +21,10 @@ public abstract class CheckInTask {
     List<StringBuilder> listMessage = new ArrayList<>();
 
 
-     abstract CheckInTask run() throws IOException, InterruptedException;
+    abstract CheckInTask run() throws IOException, InterruptedException;
 
 
-    public static Map<String, String> commonHeaders(){
+    public static Map<String, String> commonHeaders() {
         Map<String, String> headers = new HashMap<>();
         // 填充 HTTP 头信息
         headers.put("Accept", "application/json, text/plain, */*");
@@ -57,12 +57,11 @@ public abstract class CheckInTask {
     }
 
 
-
     public void addMessage(StringBuilder message) {
         listMessage.add(message);
     }
 
-    public void addMessage(String...message) {
+    public void addMessage(String... message) {
         StringBuilder sb = new StringBuilder();
         for (String s : message) {
             sb.append(s);
@@ -71,20 +70,22 @@ public abstract class CheckInTask {
     }
 
 
-    public StringBuilder lineMsg(String message){
+    public StringBuilder lineMsg(String message) {
         return new StringBuilder(message);
     }
 
-    public static StringBuilder splitLine(){
-        return new StringBuilder("==============");
-    }
 
-    public static void sleep(long time){
+    public static void sleep(long time) {
         try {
             Thread.sleep(time);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+
+    public MessageList messageList() {
+        return new MessageList("签到", listMessage);
     }
 
 }
