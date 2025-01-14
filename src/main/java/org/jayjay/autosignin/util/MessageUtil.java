@@ -9,7 +9,6 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
 import org.jayjay.autosignin.entity.MessageList;
-import org.jayjay.autosignin.task.CheckInTask;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,14 +48,15 @@ public class MessageUtil {
         account.setUser(EMAIL_USER);
         account.setPass(EMAIL_PASS);
         StringBuilder message = toHtml(messageList);
-        System.out.println(message);
-//        MailUtil.send(account, CollUtil.toList(EMAIL_TO.split(",")),
-//                "签到结果", message.toString(), true);
+//        System.out.println(message);
+        MailUtil.send(account, CollUtil.toList(EMAIL_TO.split(",")),
+                "签到结果", message.toString(), true);
         System.out.println("发送邮件成功");
     }
 
 
     public void sendPushPlus(List<MessageList> messageList){
+        System.out.println("发送pushplus");
         if(StrUtil.isBlank(PUSH_PLUS_TOKEN)){
             System.out.println("发送pushplus失败");
             return;
@@ -66,16 +66,16 @@ public class MessageUtil {
         body.set("title", "签到结果");
         StringBuilder message = toHtml(messageList);
         body.set("content", message);
-        System.out.println("发送pushplus");
-        System.out.println(message);
-//        HttpResponse execute = HttpRequest.post("http://www.pushplus.plus/send")
-//                .header("Content-Type","application/json")
-//                .body(body.toString()).execute();
-//        System.out.println(execute.body());
+//        System.out.println(message);
+        HttpResponse execute = HttpRequest.post("http://www.pushplus.plus/send")
+                .header("Content-Type","application/json")
+                .body(body.toString()).execute();
+        System.out.println(execute.body());
         System.out.println("发送pushplus成功");
     }
 
     public void sendServerChan(List<MessageList> messageList){
+        System.out.println("发送serverchan");
         if(StrUtil.isBlank(SERVER_CHAN_TOKEN)){
             System.out.println("发送serverchan失败");
             return;
@@ -85,13 +85,12 @@ public class MessageUtil {
 //        body.set("token", SERVER_CHAN_TOKEN);
         body.set("title", "签到结果");
         StringBuilder message = toMarkdown(messageList);
-        System.out.println(message);
+//        System.out.println(message);
         body.set("desp", message);
-        System.out.println("发送serverchan");
-//        HttpResponse execute = HttpRequest.post(url)
-//                .header("Content-Type","application/json")
-//                .body(body.toString()).execute();
-//        System.out.println(execute.body());
+        HttpResponse execute = HttpRequest.post(url)
+                .header("Content-Type","application/json")
+                .body(body.toString()).execute();
+        System.out.println(execute.body());
         System.out.println("发送serverchan成功");
     }
 
@@ -106,32 +105,21 @@ public class MessageUtil {
     private static StringBuilder toHtml(List<MessageList> messageList) {
         StringBuilder message = new StringBuilder();
 //        messageList.forEach(sb -> message.append("<p>").append(sb).append("</p>"));
-        AtomicInteger i = new AtomicInteger();
         messageList.forEach(item->{
-            message.append("<h2>").append(item.getTitle());
+            message.append("<h2>").append(item.getTitle()).append("</h2>");
             item.getMessages().forEach(sb->{
                 message.append("<p>").append(sb).append("</p>");
             });
-            if(i.get() < messageList.size()-1){
-                message.append("<hr>");
-                i.getAndIncrement();
-            }
         });
         return message;
     }
     private static StringBuilder toMarkdown(List<MessageList> messageList) {
         StringBuilder message = new StringBuilder();
-//        messageList.forEach(sb -> message.append("<p>").append(sb).append("</p>"));
-        AtomicInteger i = new AtomicInteger();
         messageList.forEach(item->{
             message.append("## ").append(item.getTitle()).append(dbLineEnd);
             item.getMessages().forEach(sb->{
                 message.append(sb).append(dbLineEnd);
             });
-            if(i.get() < messageList.size()-1){
-                message.append(dbLineEnd).append("------").append(dbLineEnd);
-                i.getAndIncrement();
-            }
         });
         return message;
     }
