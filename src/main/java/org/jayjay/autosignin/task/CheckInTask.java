@@ -11,12 +11,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+@Data
 public abstract class CheckInTask {
     public static final String lineEnd = "\n";
 
     static final String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82";
 
-    StringBuilder message = new StringBuilder();
 
     List<StringBuilder> listMessage = new ArrayList<>();
 
@@ -77,11 +77,6 @@ public abstract class CheckInTask {
 
     public static StringBuilder splitLine(){
         return new StringBuilder("==============");
-    }
-
-
-    public List<StringBuilder> getMessage(){
-        return listMessage;
     }
 
     public static void sleep(long time){

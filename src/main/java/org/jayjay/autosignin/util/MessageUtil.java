@@ -1,6 +1,7 @@
 package org.jayjay.autosignin.util;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.thread.ThreadUtil;
 import cn.hutool.core.util.ArrayUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
@@ -10,23 +11,27 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
 import org.jayjay.autosignin.task.CheckInTask;
+import org.junit.Test;
 
 import java.util.List;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 public class MessageUtil {
 
-    String EMAIL_USER = System.getenv("EMAIL_USER");
-    String EMAIL_PASS = System.getenv("EMAIL_PASS");
-    String EMAIL_TO = System.getenv("EMAIL_TO");
-    String PUSH_PLUS_TOKEN = System.getenv("PUSH_PLUS_TOKEN");
-    String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
+    public String EMAIL_USER = System.getenv("EMAIL_USER");
+    public String EMAIL_PASS = System.getenv("EMAIL_PASS");
+    public String EMAIL_TO = System.getenv("EMAIL_TO");
+    public String PUSH_PLUS_TOKEN = System.getenv("PUSH_PLUS_TOKEN");
+    public String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
 
     public void sendMsg(List<StringBuilder> messageList){
-        sendEmail(messageList);
-        sendPushPlus(messageList);
-        sendServerChan(messageList);
+        ScheduledThreadPoolExecutor scheduledExecutor = ThreadUtil.createScheduledExecutor(10);
+        scheduledExecutor.execute(()->sendEmail(messageList));
+        scheduledExecutor.execute(()->sendPushPlus(messageList));
+        scheduledExecutor.execute(()->sendServerChan(messageList));
 
     }
+
 
 
     public void sendEmail(List<StringBuilder> messageList){
@@ -95,4 +100,7 @@ public class MessageUtil {
         }
         return ReUtil.getGroup1("@([^@]+)$", EMAIL_USER);
     }
+
+
+
 }

@@ -5,6 +5,7 @@ import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 
@@ -12,7 +13,7 @@ import java.net.HttpCookie;
 import java.util.List;
 import java.util.Map;
 @Data
-@Slf4j
+@EqualsAndHashCode(callSuper = true)
 public class MoDbCheckInTask extends CheckInTask {
     String loginUrl = "https://www.modb.pro/api/login";
     String checkInUrl = "https://www.modb.pro/api/user/checkIn";

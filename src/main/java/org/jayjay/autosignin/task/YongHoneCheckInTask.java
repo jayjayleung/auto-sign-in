@@ -8,7 +8,7 @@ import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
-import lombok.var;
+import lombok.EqualsAndHashCode;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 @Data
+@EqualsAndHashCode(callSuper = true)
 public class YongHoneCheckInTask extends CheckInTask{
     int maxRetries = 3;
     int retryCount = 0;
@@ -31,10 +32,11 @@ public class YongHoneCheckInTask extends CheckInTask{
 
     @Test
     public void testRun(){
-//        run();
+        run();
     }
     @Override
     public CheckInTask run(){
+        //开启重试，有时候网页打开失败
         while (!success && retryCount < maxRetries) {
             addMessage("yonghong 签到");
             System.out.println("yonghong 签到任务开始");
@@ -42,8 +44,6 @@ public class YongHoneCheckInTask extends CheckInTask{
             String yhPassword = System.getenv("YH_PASSWORD");
             System.out.println("yhUsername: " + yhUsername);
             System.out.println("yhPassword: " + yhPassword);
-            yhUsername = "15913213996";
-            yhPassword = "sjie19950901.";
             //自动下载，第一次下载后不会再下载
             RevisionInfo revisionInfo = null;
             try {
@@ -123,10 +123,10 @@ public class YongHoneCheckInTask extends CheckInTask{
                 Thread.sleep(5000);
 
                 Document document = Jsoup.parse(cj.content());
-                Elements point = document.select("#ct div ul li:eq(2) font:eq(3)");
+                Elements point = document.select("#ct div ul li:eq(2) > font:eq(3)");
                 if(point !=null){
                     String pointStr = point.text();
-                    if(StrUtil.isBlank(pointStr)) {
+                    if(StrUtil.isNotBlank(pointStr)) {
                         System.out.println(pointStr);
                         addMessage(lineMsg("洪豆:").append(pointStr));
                     }

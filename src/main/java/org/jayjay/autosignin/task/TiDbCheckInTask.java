@@ -5,12 +5,14 @@ import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.net.HttpCookie;
 import java.util.List;
 import java.util.Map;
 
 @Data
+@EqualsAndHashCode(callSuper = true)
 public class TiDbCheckInTask extends CheckInTask {
 
     String loginUrl = "https://accounts.pingcap.cn/api/login/password";

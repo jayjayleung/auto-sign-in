@@ -14,13 +14,13 @@ public class MainApplication {
 
 
     public static void main(String[] args) throws Exception {
-        List<StringBuilder> message = new MoDbCheckInTask().run().getMessage();
+        List<StringBuilder> message = new MoDbCheckInTask().run().getListMessage();
         message.add(CheckInTask.splitLine());
-        message.addAll(new TiDbCheckInTask().run().getMessage());
+        message.addAll(new TiDbCheckInTask().run().getListMessage());
         message.add(CheckInTask.splitLine());
-        message.addAll(new YongHoneCheckInTask().run().getMessage());
+        message.addAll(new YongHoneCheckInTask().run().getListMessage());
         System.out.println("================================================================================================================");
         message.forEach(System.out::println);
-        new MessageUtil().sendEmail(message);
+        new MessageUtil().sendMsg(message);
     }
 }
