@@ -124,7 +124,7 @@ public class MessageUtil {
 //        messageList.forEach(sb -> message.append("<p>").append(sb).append("</p>"));
         AtomicInteger i = new AtomicInteger();
         messageList.forEach(item->{
-            message.append("## ").append(item.getTitle());
+            message.append("## ").append(item.getTitle()).append(dbLineEnd);
             item.getMessages().forEach(sb->{
                 message.append(sb).append(dbLineEnd);
             });
