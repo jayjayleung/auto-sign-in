@@ -45,5 +45,5 @@ jobs:
       run: mvn clean install --file pom.xml
 
     - name: run with java 
-      run: java -jar target/auto-sign-in-0.0.1-SNAPSHOT.jar --
+      run: java -jar target/auto-sign-in-0.0.1-SNAPSHOT.jar
 
