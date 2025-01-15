@@ -101,7 +101,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                     if(me !=null){
                         String user = me.text().replaceAll(MessageUtil.lineEnd, "");
                         System.out.println(user);
-                        addMessage(lineMsg("用户名:").append(user));
+                        addMessage(lineMsg("用户名：").append(user));
                     }
 
                     // document.querySelector("a[title='个人设置'].innerText")
@@ -133,7 +133,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                     String pointStr = point.text();
                     if(StrUtil.isNotBlank(pointStr)) {
                         System.out.println(pointStr);
-                        addMessage(lineMsg("洪豆:").append(pointStr));
+                        addMessage(lineMsg("洪豆：").append(pointStr));
                     }
                 }
 //            page.waitForNavigation();

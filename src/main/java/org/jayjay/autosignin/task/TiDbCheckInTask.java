@@ -72,13 +72,13 @@ public class TiDbCheckInTask extends CheckInTask {
                 .execute();
         JSONObject checkInBody = toJSON(checkInRes.body());
         System.out.println(checkInBody);
-        StringBuilder checkInMsg = lineMsg("签到:").append(checkInBody.getStr("detail"));
+        StringBuilder checkInMsg = lineMsg("签到：").append(checkInBody.getStr("detail"));
         addMessage(checkInMsg);
         JSONObject data = checkInBody.getJSONObject("data");
         if (data!=null && data.containsKey("points")) {
-            StringBuilder points = lineMsg("积分:").append(data.getStr("points"));
+            StringBuilder points = lineMsg("积分+").append(data.getStr("points"));
             if (data.containsKey("tomorrow_points")) {
-                points.append("，明天积分:").append(data.getStr("tomorrow_points"));
+                points.append("，明天签到可以获得").append(data.getStr("tomorrow_points")).append("积分");
             }
             addMessage(points);
         }

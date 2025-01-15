@@ -81,12 +81,12 @@ public class MoDbCheckInTask extends CheckInTask {
         String str = checkInBody.getStr("operateMessage");
         StringBuilder checkInMsg = lineMsg(str);
 
-        if(checkInBody.containsKey("operateCallBackObj")){
-            JSONObject operateCallBackObj = checkInBody.getJSONObject("operateCallBackObj");
-            if(operateCallBackObj!=null && operateCallBackObj.containsKey("point")){
-                checkInMsg.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(MessageUtil.lineEnd);
-            }
-        }
+//        if(checkInBody.containsKey("operateCallBackObj")){
+//            JSONObject operateCallBackObj = checkInBody.getJSONObject("operateCallBackObj");
+//            if(operateCallBackObj!=null && operateCallBackObj.containsKey("point")){
+//                checkInMsg.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(MessageUtil.lineEnd);
+//            }
+//        }
         addMessage(checkInMsg);
         System.out.println("Modb 签到任务结束...");
         return this;
