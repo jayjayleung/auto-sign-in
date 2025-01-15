@@ -78,7 +78,7 @@ public class TiDbCheckInTask extends CheckInTask {
         if (data!=null && data.containsKey("points")) {
             StringBuilder points = lineMsg("获得").append(data.getStr("points")).append("积分");
             if (data.containsKey("tomorrow_points")) {
-                points.append("，明天签到可以获得").append(data.getStr("tomorrow_points")).append("积分");
+                points.append("，明天签到获得").append(data.getStr("tomorrow_points")).append("积分");
             }
             addMessage(points);
         }
