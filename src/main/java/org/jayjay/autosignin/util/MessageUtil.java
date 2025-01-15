@@ -11,7 +11,6 @@ import cn.hutool.json.JSONObject;
 import org.jayjay.autosignin.entity.MessageList;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class MessageUtil {
 

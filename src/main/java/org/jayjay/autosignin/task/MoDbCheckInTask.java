@@ -6,7 +6,6 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import lombok.extern.slf4j.Slf4j;
 import org.jayjay.autosignin.entity.MessageList;
 import org.jayjay.autosignin.util.MessageUtil;
 import org.junit.Test;
