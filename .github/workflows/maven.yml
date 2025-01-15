@@ -21,8 +21,8 @@ env:
   TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
   YH_USERNAME: ${{ secrets.YH_USERNAME }}
   YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
-  EMAIL_USER: ${{ secrets.EMAIL_USER }}
-  EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+  EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+  EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
   EMAIL_TO: ${{ secrets.EMAIL_TO }}
   PUSH_PLUS_TOKEN: ${{ secrets.PUSH_PLUS_TOKEN }}
   SERVER_CHAN_TOKEN: ${{ secrets.SERVER_CHAN_TOKEN }}
