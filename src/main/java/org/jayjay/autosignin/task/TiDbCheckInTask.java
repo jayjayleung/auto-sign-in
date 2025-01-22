@@ -1,5 +1,6 @@
 package org.jayjay.autosignin.task;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
@@ -28,9 +29,14 @@ public class TiDbCheckInTask extends CheckInTask {
     @Override
     public CheckInTask run() {
         System.out.println("TiDb 签到任务开始");
-        System.out.println("开始登录...");
         String tidbUsername = System.getenv("TIDB_USERNAME");
         String tidbPassword = System.getenv("TIDB_PASSWORD");
+        if(StrUtil.isBlank(tidbUsername) || StrUtil.isBlank(tidbPassword)){
+            System.out.println("TiDb 账号密码未配置，跳过签到");
+            isRun = !isRun;
+            return this;
+        }
+        System.out.println("开始登录...");
         JSONObject bodyJson = JSONUtil.createObj();
         bodyJson.set("identifier", tidbUsername);
         bodyJson.set("password", tidbPassword);

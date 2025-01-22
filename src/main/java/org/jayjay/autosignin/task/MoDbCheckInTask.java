@@ -1,5 +1,6 @@
 package org.jayjay.autosignin.task;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
@@ -13,6 +14,7 @@ import org.junit.Test;
 import java.net.HttpCookie;
 import java.util.List;
 import java.util.Map;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class MoDbCheckInTask extends CheckInTask {
@@ -20,22 +22,28 @@ public class MoDbCheckInTask extends CheckInTask {
     String checkInUrl = "https://www.modb.pro/api/user/checkIn";
     String userUrl = "https://www.modb.pro/api/user/detail";
 
+
     @Override
     public MessageList messageList() {
         return new MessageList("Modb 签到", listMessage);
     }
 
     @Test()
-    public void testRun(){
+    public void testRun() {
         run();
     }
 
     @Override
     public CheckInTask run() {
         System.out.println("Modb 签到任务开始");
-        System.out.println("开始登录...");
         String modbUsername = System.getenv("MODB_USERNAME");
         String modbPassword = System.getenv("MODB_PASSWORD");
+        if (StrUtil.isBlank(modbUsername) || StrUtil.isBlank(modbPassword)) {
+            System.out.println("Modb 账号密码未配置，跳过签到");
+            isRun = !isRun;
+            return this;
+        }
+        System.out.println("开始登录...");
         JSONObject bodyJson = JSONUtil.createObj();
         bodyJson.set("phoneNum", modbUsername);
         bodyJson.set("password", modbPassword);
@@ -45,6 +53,7 @@ public class MoDbCheckInTask extends CheckInTask {
 
         if (!loginRes.isOk()) {
             System.out.println("Modb 登录失败！");
+            System.out.println(loginRes.body());
             addMessage("Modb 签到失败！请检查日志!!!");
             return this;
         }
@@ -58,12 +67,12 @@ public class MoDbCheckInTask extends CheckInTask {
         HttpResponse userRes = HttpRequest.get(userUrl)
                 .cookie(cookies)
                 .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
-        if(userRes.isOk()) {
+        if (userRes.isOk()) {
             JSONObject userBody = toJSON(userRes.body());
             System.out.println(userBody);
             StringBuilder account = lineMsg("用户名：").append(userBody.getStr("account"));
             addMessage(account);
-            addMessage("墨值：",userBody.getStr("point"));
+            addMessage("墨值：", userBody.getStr("point"));
         }
         //签到
         System.out.println("开始签到...");
@@ -99,6 +108,7 @@ public class MoDbCheckInTask extends CheckInTask {
         headers.put("Referer", "https://www.modb.pro/login?redirect=%2ForderList");
         return headers;
     }
+
     public Map<String, String> userHeaders(String token) {
         Map<String, String> headers = commonHeaders();
         headers.put("Host", "www.modb.pro");

@@ -11,6 +11,7 @@ import cn.hutool.json.JSONObject;
 import org.jayjay.autosignin.entity.MessageList;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class MessageUtil {
 
@@ -24,9 +25,14 @@ public class MessageUtil {
     public String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
 
     public void sendMsg(List<MessageList> messageList){
-        sendEmail(messageList);
-        sendPushPlus(messageList);
-        sendServerChan(messageList);
+        List<MessageList> sendList = messageList.stream().filter(MessageList::isSend).collect(Collectors.toList());
+        if(CollUtil.isEmpty(sendList)){
+            System.out.println("没有需要发送的消息，停止发送");
+            return;
+        }
+        sendEmail(sendList);
+        sendPushPlus(sendList);
+        sendServerChan(sendList);
 
     }
 

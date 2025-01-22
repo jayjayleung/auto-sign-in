@@ -47,8 +47,14 @@ public class YongHoneCheckInTask extends CheckInTask{
             System.out.println("yonghong 签到任务开始");
             String yhUsername = System.getenv("YH_USERNAME");
             String yhPassword = System.getenv("YH_PASSWORD");
+            if(StrUtil.isBlank(yhUsername) || StrUtil.isBlank(yhPassword)){
+                System.out.println("yonghong 账号密码未配置，跳过签到");
+                isRun = !isRun;
+                return this;
+            }
             System.out.println("yhUsername: " + yhUsername);
             System.out.println("yhPassword: " + yhPassword);
+
             //自动下载，第一次下载后不会再下载
             RevisionInfo revisionInfo = null;
             try {

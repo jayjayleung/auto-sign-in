@@ -21,6 +21,9 @@ public abstract class CheckInTask {
     List<StringBuilder> listMessage = new ArrayList<>();
 
 
+    boolean isRun = true;
+
+
     abstract CheckInTask run() throws IOException, InterruptedException;
 
 
@@ -83,6 +86,9 @@ public abstract class CheckInTask {
         }
     }
 
+    public MessageList getMsg() {
+        return isRun ? messageList() : new MessageList();
+    }
 
     public MessageList messageList() {
         return new MessageList("签到", listMessage);
