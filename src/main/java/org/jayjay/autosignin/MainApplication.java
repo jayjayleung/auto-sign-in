@@ -13,7 +13,7 @@ import java.util.List;
 public class MainApplication {
 
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         List<MessageList> messages = new ArrayList<>();
         messages.add(new MoDbCheckInTask().run().getMsg());
         messages.add(new TiDbCheckInTask().run().getMsg());
