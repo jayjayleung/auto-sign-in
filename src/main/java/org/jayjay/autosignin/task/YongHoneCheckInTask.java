@@ -23,7 +23,8 @@ import java.util.Optional;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class YongHoneCheckInTask extends CheckInTask{
-    int maxRetries = 3;
+    //重试五次
+    int maxRetries = 5;
     int retryCount = 0;
     boolean success = false;
     int delay = 1000; // 初始延迟为1秒
@@ -44,6 +45,9 @@ public class YongHoneCheckInTask extends CheckInTask{
     public CheckInTask run(){
         //开启重试，有时候网页打开失败
         while (!success && retryCount < maxRetries) {
+            if(retryCount > 0){
+                System.out.println("出现异常，正在重试第"+retryCount+"...");
+            }
             System.out.println("yonghong 签到任务开始");
             String yhUsername = System.getenv("YH_USERNAME");
             String yhPassword = System.getenv("YH_PASSWORD");
@@ -159,7 +163,6 @@ public class YongHoneCheckInTask extends CheckInTask{
                 retryCount++;
                 sleep(delay);
                 delay *= 2; // 延迟指数增加
-                System.out.println("出现异常，正在重试第"+retryCount+"...");
                 if(retryCount>=maxRetries){
                     addMessage("永洪签到失败，请查看日志");
                 }
