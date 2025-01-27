@@ -10,7 +10,7 @@ name: autoSignIn
 
 on:
   schedule:
-    - cron: "11 23 * * *" # 北京时间上午07:30
+    - cron: "11 23 * * *" # 北京时间上午07:11
   workflow_dispatch:
 
 env:
