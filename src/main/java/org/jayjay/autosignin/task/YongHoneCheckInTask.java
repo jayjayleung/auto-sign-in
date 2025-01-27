@@ -27,7 +27,7 @@ public class YongHoneCheckInTask extends CheckInTask{
     int maxRetries = 5;
     int retryCount = 0;
     boolean success = false;
-    int delay = 1000; // 初始延迟为1秒
+    int delay = 3000; // 初始延迟为3秒 6s 12s 24s 48s 96s
     String loginUrl = "https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no";
     String checkInUrl = "https://club.yonghongtech.com/home.php?mod=space&uid=${user_id}&do=signlog&from=space";
     String cjUrl = "https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3";
@@ -44,7 +44,7 @@ public class YongHoneCheckInTask extends CheckInTask{
     @Override
     public CheckInTask run(){
         //开启重试，有时候网页打开失败
-        while (!success && retryCount < maxRetries) {
+        while (!success && retryCount <= maxRetries) {
             if(retryCount > 0){
                 System.out.println("出现异常，正在重试第"+retryCount+"...");
             }
