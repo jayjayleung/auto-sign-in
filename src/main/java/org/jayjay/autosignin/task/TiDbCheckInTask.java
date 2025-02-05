@@ -64,7 +64,7 @@ public class TiDbCheckInTask extends CheckInTask {
         if (meRes.isOk()) {
             JSONObject userBody = toJSON(meRes.body());
             System.out.println(userBody);
-            addMessage(lineMsg("用户：").append(userBody.getJSONObject("data").getStr("username")));
+            addMessage(lineMsg("用户名：").append(userBody.getJSONObject("data").getStr("username")));
         }
         HttpResponse pointRes = HttpRequest.get(pointsUrl).cookie(cookies).headerMap(checkInHeaders(), true).execute();
         if (pointRes.isOk()) {
