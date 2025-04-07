@@ -38,9 +38,6 @@ public class MoDbCheckInTask extends CheckInTask {
     private static final String AES_IV = "xqgb1vda11s0e94g"; // 可能需要根据实际加密模式调整
 
 
-
-
-
     @Override
     public MessageList messageList() {
         return new MessageList("Modb 签到", listMessage);
@@ -53,79 +50,82 @@ public class MoDbCheckInTask extends CheckInTask {
 
     @Override
     public CheckInTask run() {
-        System.out.println("Modb 签到任务开始");
-        String modbUsername = System.getenv("MODB_USERNAME");
-        String modbPassword = System.getenv("MODB_PASSWORD");
-        if (StrUtil.isBlank(modbUsername) || StrUtil.isBlank(modbPassword)) {
-            System.out.println("Modb 账号密码未配置，跳过签到");
-            isRun = !isRun;
-            return this;
-        }
-        System.out.println("开始登录...");
-        JSONObject bodyJson = JSONUtil.createObj();
-        bodyJson.set("phoneNum", modbUsername);
-        bodyJson.set("password", modbPassword);
-        HttpResponse loginRes = HttpRequest.post(loginUrl).headerMap(headers(), true)
-                .body(bodyJson.toString())
-                .execute();
+        try {
 
-        if (!loginRes.isOk()) {
-            System.out.println("Modb 登录失败！");
-            System.out.println(loginRes.body());
-            addMessage("Modb 签到失败！请检查日志!!!");
-            return this;
-        }
-        JSONObject loginBody = toJSON(loginRes.body());
-        System.out.println(loginBody.getStr("operateMessage"));
-        List<HttpCookie> cookies = loginRes.getCookies();
-        loginRes.getCookies().forEach(System.out::println);
-        Map<String, String> headers = headers();
-        headers.put("Authorization", loginRes.header("Authorization"));
-        //查询用户信息
-        HttpResponse userRes = HttpRequest.get(userUrl)
-                .cookie(cookies)
-                .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
-        if (userRes.isOk()) {
-            JSONObject userBody = toJSON(userRes.body());
-            System.out.println(userBody);
-            StringBuilder account = lineMsg("用户名：").append(userBody.getStr("account"));
-            addMessage(account);
-            addMessage("墨值：", userBody.getStr("point"));
-        }
-        //获取aes加密时间戳
-        HttpResponse clockRes = HttpRequest.get(clockUrl)
-                .cookie(cookies)
-                .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
-        String reqKey = "";
-        if (clockRes.isOk()) {
-            JSONObject body = toJSON(clockRes.body());
-            System.out.println(body);
-            if (body.containsKey("operateCallBackObj")) {
-                String operateCallBackObj = body.getStr("operateCallBackObj");
-                try {
-                    reqKey = encryptRequestKey(operateCallBackObj);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+
+            System.out.println("Modb 签到任务开始");
+            String modbUsername = System.getenv("MODB_USERNAME");
+            String modbPassword = System.getenv("MODB_PASSWORD");
+            if (StrUtil.isBlank(modbUsername) || StrUtil.isBlank(modbPassword)) {
+                System.out.println("Modb 账号密码未配置，跳过签到");
+                isRun = !isRun;
+                return this;
+            }
+            System.out.println("开始登录...");
+            JSONObject bodyJson = JSONUtil.createObj();
+            bodyJson.set("phoneNum", modbUsername);
+            bodyJson.set("password", modbPassword);
+            HttpResponse loginRes = HttpRequest.post(loginUrl).headerMap(headers(), true)
+                    .body(bodyJson.toString())
+                    .execute();
+
+            if (!loginRes.isOk()) {
+                System.out.println("Modb 登录失败！");
+                System.out.println(loginRes.body());
+                addMessage("Modb 签到失败！请检查日志!!!");
+                return this;
+            }
+            JSONObject loginBody = toJSON(loginRes.body());
+            System.out.println(loginBody.getStr("operateMessage"));
+            List<HttpCookie> cookies = loginRes.getCookies();
+            loginRes.getCookies().forEach(System.out::println);
+            Map<String, String> headers = headers();
+            headers.put("Authorization", loginRes.header("Authorization"));
+            //查询用户信息
+            HttpResponse userRes = HttpRequest.get(userUrl)
+                    .cookie(cookies)
+                    .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
+            if (userRes.isOk()) {
+                JSONObject userBody = toJSON(userRes.body());
+                System.out.println(userBody);
+                StringBuilder account = lineMsg("用户名：").append(userBody.getStr("account"));
+                addMessage(account);
+                addMessage("墨值：", userBody.getStr("point"));
+            }
+            //获取aes加密时间戳
+            HttpResponse clockRes = HttpRequest.get(clockUrl)
+                    .cookie(cookies)
+                    .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
+            String reqKey = "";
+            if (clockRes.isOk()) {
+                JSONObject body = toJSON(clockRes.body());
+                System.out.println(body);
+                if (body.containsKey("operateCallBackObj")) {
+                    String operateCallBackObj = body.getStr("operateCallBackObj");
+                    try {
+                        reqKey = encryptRequestKey(operateCallBackObj);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             }
-        }
-        //签到
-        System.out.println("开始签到...");
-        HttpResponse checkInRes = HttpRequest.post(checkInUrl)
-                .cookie(cookies)
-                .body("{\"reqKey\":\"" + reqKey + "\"}")
-                .headerMap(headers, true).execute();
-        String body = checkInRes.body();
-        if (!checkInRes.isOk()) {
+            //签到
+            System.out.println("开始签到...");
+            HttpResponse checkInRes = HttpRequest.post(checkInUrl)
+                    .cookie(cookies)
+                    .body("{\"reqKey\":\"" + reqKey + "\"}")
+                    .headerMap(headers, true).execute();
+            String body = checkInRes.body();
+            if (!checkInRes.isOk()) {
+                System.out.println(body);
+                System.out.println("Modb 签到失败！");
+                addMessage("Modb 签到失败！请检查日志!!!");
+                return this;
+            }
             System.out.println(body);
-            System.out.println("Modb 签到失败！");
-            addMessage("Modb 签到失败！请检查日志!!!");
-            return this;
-        }
-        System.out.println(body);
-        JSONObject checkInBody = toJSON(body);
-        String str = checkInBody.getStr("operateMessage");
-        StringBuilder checkInMsg = lineMsg(str);
+            JSONObject checkInBody = toJSON(body);
+            String str = checkInBody.getStr("operateMessage");
+            StringBuilder checkInMsg = lineMsg(str);
 
 //        if(checkInBody.containsKey("operateCallBackObj")){
 //            JSONObject operateCallBackObj = checkInBody.getJSONObject("operateCallBackObj");
@@ -133,8 +133,12 @@ public class MoDbCheckInTask extends CheckInTask {
 //                checkInMsg.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(MessageUtil.lineEnd);
 //            }
 //        }
-        addMessage(checkInMsg);
-        System.out.println("Modb 签到任务结束...");
+            addMessage(checkInMsg);
+            System.out.println("Modb 签到任务结束...");
+        } catch (Exception e) {
+            e.printStackTrace();
+            addMessage("Modb 签到失败！请检查日志!!!");
+        }
         return this;
     }
 
@@ -154,7 +158,6 @@ public class MoDbCheckInTask extends CheckInTask {
 //        headers.put("Referer", "https://www.modb.pro/login?redirect=%2ForderList");
         return headers;
     }
-
 
 
     // 生成类似原JS的UUID
