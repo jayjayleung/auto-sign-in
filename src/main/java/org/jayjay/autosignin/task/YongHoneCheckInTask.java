@@ -3,6 +3,7 @@ package org.jayjay.autosignin.task;
 import cn.hutool.core.util.StrUtil;
 import com.ruiyun.jvppeteer.api.core.Browser;
 import com.ruiyun.jvppeteer.api.core.ElementHandle;
+import com.ruiyun.jvppeteer.api.core.Frame;
 import com.ruiyun.jvppeteer.api.core.Page;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.*;
@@ -22,7 +23,7 @@ import java.util.Optional;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-public class YongHoneCheckInTask extends CheckInTask{
+public class YongHoneCheckInTask extends CheckInTask {
     //重试五次
     int maxRetries = 5;
     int retryCount = 0;
@@ -31,6 +32,7 @@ public class YongHoneCheckInTask extends CheckInTask{
     String loginUrl = "https://club.yonghongtech.com/member.php?mod=logging&action=login&phonelogin=no";
     String checkInUrl = "https://club.yonghongtech.com/home.php?mod=space&uid=${user_id}&do=signlog&from=space";
     String cjUrl = "https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3";
+    String publishUrl = "https://club.yonghongtech.com/forum.php?mod=post&action=newthread&fid=80";
 
     @Override
     public MessageList messageList() {
@@ -38,20 +40,21 @@ public class YongHoneCheckInTask extends CheckInTask{
     }
 
     @Test
-    public void testRun(){
+    public void testRun() {
         run();
     }
+
     @Override
-    public CheckInTask run(){
+    public CheckInTask run() {
         //开启重试，有时候网页打开失败
         while (!success && retryCount <= maxRetries) {
-            if(retryCount > 0){
-                System.out.println("出现异常，正在重试第"+retryCount+"...");
+            if (retryCount > 0) {
+                System.out.println("出现异常，正在重试第" + retryCount + "...");
             }
             System.out.println("yonghong 签到任务开始");
             String yhUsername = System.getenv("YH_USERNAME");
             String yhPassword = System.getenv("YH_PASSWORD");
-            if(StrUtil.isBlank(yhUsername) || StrUtil.isBlank(yhPassword)){
+            if (StrUtil.isBlank(yhUsername) || StrUtil.isBlank(yhPassword)) {
                 System.out.println("yonghong 账号密码未配置，跳过签到");
                 isRun = !isRun;
                 return this;
@@ -108,7 +111,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                     System.out.println(page.url());
                     Document document = Jsoup.parse(page.content());
                     Elements me = document.select(".nex_Home_intel h5");
-                    if(me !=null){
+                    if (me != null) {
                         String user = me.text().replaceAll(MessageUtil.lineEnd, "");
                         System.out.println(user);
                         addMessage(lineMsg("用户名：").append(user));
@@ -139,9 +142,9 @@ public class YongHoneCheckInTask extends CheckInTask{
 
                 Document document = Jsoup.parse(cj.content());
                 Elements point = document.select("#ct div ul li:eq(2) > font:eq(3)");
-                if(point !=null){
+                if (point != null) {
                     String pointStr = point.text();
-                    if(StrUtil.isNotBlank(pointStr)) {
+                    if (StrUtil.isNotBlank(pointStr)) {
                         System.out.println(pointStr);
                         addMessage(lineMsg("洪豆：").append(pointStr));
                     }
@@ -156,6 +159,8 @@ public class YongHoneCheckInTask extends CheckInTask{
                 addMessage(cjMsg);
                 System.out.println("永洪抽奖完成");
                 System.out.println(cj.url());
+                //开始发布
+                publishCheckIn(browser);
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -163,7 +168,7 @@ public class YongHoneCheckInTask extends CheckInTask{
                 retryCount++;
                 sleep(delay);
                 delay *= 2; // 延迟指数增加
-                if(retryCount>=maxRetries){
+                if (retryCount >= maxRetries) {
                     addMessage("永洪签到失败，请查看日志");
                 }
                 listMessage.clear();
@@ -171,5 +176,53 @@ public class YongHoneCheckInTask extends CheckInTask{
         }
 
         return this;
+    }
+
+    /**
+     * 论坛发布
+     *
+     * @param browser
+     */
+    public void publishCheckIn(Browser browser) {
+        if(retryCount>0){
+            return;
+        }
+        try {
+            System.out.println("开始论坛发布");
+            Page page = browser.newPage();
+            page.setUserAgent(userAgent);
+            page.goTo(publishUrl);
+            Thread.sleep(5000);
+            System.out.println(page.url());
+            page.evaluate("document.querySelectorAll('#typeid_ctrl_menu li')[1].click()");
+
+            page.type("#subject", "签到");
+            // 等待 iframe 加载并定位
+            ElementHandle iframeHandle = page.waitForSelector("iframe#e_iframe");
+            Frame frame = iframeHandle.contentFrame();
+
+            // 在 iframe 内操作
+            frame.$("body").type("签到");
+
+            page.$("#postsubmit").click();
+            boolean flag = false;
+            for (int i = 0; i < 10; i++) {
+                if (page.url().equals(publishUrl)) {
+                    Thread.sleep(2000);
+                } else {
+                    flag = true;
+                }
+            }
+            if (flag) {
+                page.$("#fastpostmessage").type("签到");
+                page.$("#fastpostsubmit").hover();
+                page.$("#fastpostsubmit").click();
+                addMessage("发布完成，洪豆+25");
+            }
+            System.out.println("论坛发布完成");
+        } catch (Exception e) {
+            e.printStackTrace();
+            addMessage("论坛发布失败");
+        }
     }
 }
