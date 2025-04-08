@@ -184,9 +184,6 @@ public class YongHoneCheckInTask extends CheckInTask {
      * @param browser
      */
     public void publishCheckIn(Browser browser) {
-        if(retryCount>0){
-            return;
-        }
         try {
             System.out.println("开始论坛发布");
             Page page = browser.newPage();
