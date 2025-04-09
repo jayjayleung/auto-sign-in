@@ -208,11 +208,11 @@ public class YongHoneCheckInTask extends CheckInTask {
                     Thread.sleep(2000);
                 } else {
                     flag = true;
+                    System.out.println(page.url());
                 }
             }
             if (flag) {
                 page.$("#fastpostmessage").type("签到");
-                page.$("#fastpostsubmit").hover();
                 page.$("#fastpostsubmit").click();
                 addMessage("发布完成，洪豆+25");
             }
