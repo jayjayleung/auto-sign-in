@@ -313,11 +313,13 @@ public class YongHoneCheckInTask extends CheckInTask {
             }
             if (flag) {
                 Thread.sleep(2000);
-//                page.$("#fastpostmessage").type("签到");
+                page.$("#fastpostmessage").type("签到");
 //                Thread.sleep(2000);
 //                page.$("#fastpostsubmit").click();
-                page.evaluate("document.getElementById('fastpostmessage').innerText='签到'");
+//                page.evaluate("document.getElementById('fastpostmessage').innerText='签到'");
+                Thread.sleep(2000);
                 page.evaluate("document.getElementById('fastpostsubmit').click();");
+                Thread.sleep(2000);
                 addMessage("发布完成，洪豆+25");
             }
             System.out.println("论坛发布完成");
