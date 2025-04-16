@@ -320,7 +320,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 Thread.sleep(2000);
                 page.evaluate("document.getElementById('fastpostsubmit').click();");
                 Thread.sleep(2000);
-                addMessage("发布完成，洪豆+25");
+                addMessage("论坛发布完成，洪豆25");
             }
             System.out.println("论坛发布完成");
         } catch (Exception e) {
