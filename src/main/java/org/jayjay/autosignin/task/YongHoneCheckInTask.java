@@ -149,6 +149,7 @@ public class YongHoneCheckInTask extends CheckInTask {
         while (!success && retryCount <= maxRetries) {
             if (retryCount > 0) {
                 System.out.println("出现异常，正在重试第" + retryCount + "...");
+                listMessage.clear();
             }
             System.out.println("yonghong 签到任务开始");
             String yhUsername = System.getenv("YH_USERNAME");
@@ -267,10 +268,10 @@ public class YongHoneCheckInTask extends CheckInTask {
                 retryCount++;
                 sleep(delay);
                 delay *= 2; // 延迟指数增加
+                listMessage.clear();
                 if (retryCount >= maxRetries) {
                     addMessage("永洪签到失败，请查看日志");
                 }
-                listMessage.clear();
             }
         }
 
