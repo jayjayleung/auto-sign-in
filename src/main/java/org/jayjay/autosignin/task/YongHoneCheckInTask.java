@@ -204,6 +204,18 @@ public class YongHoneCheckInTask extends CheckInTask {
                     String uid = any.get().getValue();
                     System.out.println("获取cookie成功:" + uid);
                     System.out.println(page.url());
+                    //检查是否到了主页
+                    for (int i = 0; i < 10; i++) {
+                        if (page.url().equals(loginUrl)) {
+                            Thread.sleep(2000);
+                            System.out.println(page.url());
+                            System.out.println("还在登录页面。。。继续等待2s");
+                        } else {
+                            System.out.println("进入首页成功");
+                            System.out.println(page.url());
+                            break;
+                        }
+                    }
                     addMessage("UID：", uid);
                     String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
                     page.goTo(url);
