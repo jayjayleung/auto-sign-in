@@ -24,6 +24,7 @@ public class MessageUtil {
     public String PUSH_PLUS_TOKEN = System.getenv("PUSH_PLUS_TOKEN");
     public String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
 
+
     public void sendMsg(List<MessageList> messageList){
         List<MessageList> sendList = messageList.stream().filter(MessageList::isSend).collect(Collectors.toList());
         if(CollUtil.isEmpty(sendList)){
@@ -47,7 +48,14 @@ public class MessageUtil {
 
         MailAccount account = new MailAccount();
         account.setHost("smtp."+extractDomain());
-        account.setPort(25);
+        //端口25是不加密的，465是SSL/TLS加密的 587是STARTTLS加密的
+        //如果使用465端口，需要在邮箱设置中开启SSL/TLS加密，否则会报错
+        //如果使用587端口，需要在邮箱设置中开启STARTTLS加密，否则会报错
+        //如果使用25端口，不需要在邮箱设置中开启加密，但是会有安全风险，不建议使用
+//        account.setPort(25);
+        account.setPort(465);
+        account.setSslEnable(true);
+//        account.setStarttlsEnable(true);
         account.setAuth(true);
         account.setFrom(EMAIL_USERNAME);
         account.setUser(EMAIL_USERNAME);
