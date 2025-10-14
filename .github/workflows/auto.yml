@@ -1,0 +1,48 @@
+# This workflow will build a Java project with Maven, and cache/restore any dependencies to improve the workflow execution time
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-java-with-maven
+
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: autoSignIn
+
+on:
+  schedule:
+    - cron: "11 23 * * *" # 北京时间上午07:11
+  workflow_dispatch:
+
+env:
+  MODB_USERNAME: ${{ secrets.MODB_USERNAME }}
+  MODB_PASSWORD: ${{ secrets.MODB_PASSWORD }}
+  TIDB_USERNAME: ${{ secrets.TIDB_USERNAME }}
+  TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
+  YH_USERNAME: ${{ secrets.YH_USERNAME }}
+  YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
+  EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+  EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+  EMAIL_TO: ${{ secrets.EMAIL_TO }}
+  PUSH_PLUS_TOKEN: ${{ secrets.PUSH_PLUS_TOKEN }}
+  SERVER_CHAN_TOKEN: ${{ secrets.SERVER_CHAN_TOKEN }}
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 8
+      uses: actions/setup-java@v4
+      with:
+        java-version: '8'
+        distribution: 'zulu'
+        cache: maven
+    - name: Build with Maven
+#      run: mvn -B package --file pom.xml
+      run: mvn clean install --file pom.xml
+
+    - name: run with java 
+      run: java -jar target/auto-sign-in-0.0.1-SNAPSHOT.jar
+
