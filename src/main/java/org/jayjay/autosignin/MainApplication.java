@@ -15,9 +15,9 @@ public class MainApplication {
 
     public static void main(String[] args) {
         List<MessageList> messages = new ArrayList<>();
-//        messages.add(new MoDbCheckInTask().run().getMsg());
+        messages.add(new MoDbCheckInTask().run().getMsg());
         messages.add(new TiDbCheckInTask().run().getMsg());
-//        messages.add(new YongHoneCheckInTask().run().getMsg());
+        messages.add(new YongHoneCheckInTask().run().getMsg());
         System.out.println("================================================================================================================");
         messages.stream().filter(MessageList::isSend).forEach(messageList-> {
             System.out.println(messageList.getTitle());
