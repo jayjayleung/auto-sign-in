@@ -17,10 +17,12 @@ import java.util.Map;
 @EqualsAndHashCode(callSuper = true)
 public class TiDbCheckInTask extends CheckInTask {
 
-    String loginUrl = "https://accounts.pingcap.cn/api/login/password";
-    String checkInUrl = "https://tidb.net/api/points/daily-checkin";
-    String userUrl = "https://tidb.net/api/me";
-    String pointsUrl = "https://tidb.net/api/points/me";
+//    String loginUrl = "https://accounts.pingcap.cn/api/login/password";
+    String loginUrl = "https://pingkai.cn/accounts/api/login/password";
+    String checkInUrl = "https://pingkai.cn/accounts/api/points/daily-checkin";
+    String userUrl = "https://pingkai.cn/accounts/api/me";
+    String pointsUrl = "https://pingkai.cn/accounts/api/points/me";
+    String redirectTo = "https://pingkai.cn/tidbcommunity/member";
 
     @Override
     public MessageList messageList() {
@@ -42,7 +44,7 @@ public class TiDbCheckInTask extends CheckInTask {
             JSONObject bodyJson = JSONUtil.createObj();
             bodyJson.set("identifier", tidbUsername);
             bodyJson.set("password", tidbPassword);
-            bodyJson.set("redirect_to", "https://tidb.net/member");
+            bodyJson.set("redirect_to", redirectTo);
             HttpResponse loginRes = HttpRequest.post(loginUrl).headerMap(headers(), true)
                     .body(bodyJson.toString())
                     .execute();
@@ -74,7 +76,7 @@ public class TiDbCheckInTask extends CheckInTask {
                 addMessage("当前积分：", pointBody.getJSONObject("data").getStr("current_points"));
             }
             System.out.println("开始签到...");
-            HttpResponse checkInRes = HttpRequest.post("https://tidb.net/api/points/daily-checkin")
+            HttpResponse checkInRes = HttpRequest.post(checkInUrl)
                     .cookie(cookies)
                     .headerMap(checkInHeaders, true)
                     .execute();
@@ -101,14 +103,14 @@ public class TiDbCheckInTask extends CheckInTask {
 
     public Map<String, String> headers() {
         Map<String, String> headers = commonHeaders();
-        headers.put("Origin", "https://accounts.pingcap.cn");
+        headers.put("Origin", "https://pingkai.cn");
         return headers;
     }
 
     public Map<String, String> checkInHeaders() {
         Map<String, String> headers = commonHeaders();
-        headers.put("Origin", "https://tidb.net");
-        headers.put("Referer", "https://tidb.net/member");
+        headers.put("Origin", "https://pingkai.cn");
+        headers.put("Referer", "https://pingkai.cn/tidbcommunity/member");
         return headers;
     }
 

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<exe4j version="10.0.1" transformSequenceNumber="3">
+  <directoryPresets config="D:/jayjay/projects/auto-sign-in/out/artifacts/auto_sign_in_jar" />
+  <application name="auto-sign-in" distributionSourceDir="D:/jayjay/java-exe/auto-sign-in" />
+  <executable name="auto-sign-in" wrapperType="embed" executableDir="." redirectStderr="false" executableMode="console" />
+  <java mainClass="org.jayjay.autosignin.MainApplication" minVersion="1.8">
+    <searchSequence>
+      <directory location="./jre" />
+    </searchSequence>
+    <classPath>
+      <archive location="D:/jayjay/projects/auto-sign-in/out/artifacts/auto_sign_in_jar/auto-sign-in.jar" failOnError="false" />
+    </classPath>
+  </java>
+</exe4j>
