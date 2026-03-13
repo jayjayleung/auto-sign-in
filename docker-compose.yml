@@ -1,0 +1,12 @@
+services:
+  auto-sign-in:
+    build: .
+    container_name: auto-sign-in
+    env_file:
+      - .env                      # 加载第一份环境变量
+    environment:
+      - TZ=Asia/Shanghai
+      - CRON_SCHEDULE=11 9 * * *
+      - RUN_ON_STARTUP=false
+    restart: unless-stopped
+
