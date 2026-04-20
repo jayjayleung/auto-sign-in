@@ -21,6 +21,7 @@ target/
 .env
 .env*
 !.env.example
+docker-compose.yml
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
