@@ -8,5 +8,25 @@ services:
       - TZ=Asia/Shanghai
       - CRON_SCHEDULE=11 9 * * *
       - RUN_ON_STARTUP=false
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
+  auto-sign-in-fanfan:
+    build: .
+    container_name: auto-sign-in-fanfan
+    env_file:
+      - .env.fanfan              # 加载第二份环境变量
+    environment:
+      - TZ=Asia/Shanghai
+      - CRON_SCHEDULE=13 9 * * *
+      - RUN_ON_STARTUP=false
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: unless-stopped
