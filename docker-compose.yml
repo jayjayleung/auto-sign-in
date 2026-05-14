@@ -13,7 +13,7 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    restart: unless-stopped
+    restart: always
 
   auto-sign-in-fanfan:
     build: .
@@ -29,4 +29,4 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    restart: unless-stopped
+    restart: always
