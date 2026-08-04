@@ -11,6 +11,7 @@
 - **[墨天轮(墨道db)](https://tidb.net/)** 签到
 - **[tidb](https://www.modb.pro/)** 签到
 - **[永洪社区](https://club.yonghongtech.com/)** 签到+抽抽乐
+- **[趣鸭积分中心](https://api.quya.org/custom/93bbf0afef76f203)** 多账号签到
 
 
 ## 如何使用?
@@ -40,6 +41,10 @@
 | TIDB_PASSWORD | tidb密码 | 是 |
 | YH_USERNAME | 永洪社区用户名 | 是 |
 | YH_PASSWORD | 永洪社区密码 | 是 |
+| QUYA_USERNAME_1 | 趣鸭账号 1 邮箱 | 否 |
+| QUYA_PASSWORD_1 | 趣鸭账号 1 密码 | 否 |
+| QUYA_USERNAME_2 | 趣鸭账号 2 邮箱 | 否 |
+| QUYA_PASSWORD_2 | 趣鸭账号 2 密码 | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需要开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 订阅人邮箱地址(收件人)，如需多人订阅使用 `,` 分割，例如: `a@163.com,b@qq.com` | 否 |
@@ -77,6 +82,10 @@ cp .env.example .env
 | TIDB_PASSWORD | TiDB 社区密码 | 否 |
 | YH_USERNAME | 永洪社区用户名 | 否 |
 | YH_PASSWORD | 永洪社区密码 | 否 |
+| QUYA_USERNAME_1 | 趣鸭账号 1 邮箱 | 否 |
+| QUYA_PASSWORD_1 | 趣鸭账号 1 密码 | 否 |
+| QUYA_USERNAME_2 | 趣鸭账号 2 邮箱 | 否 |
+| QUYA_PASSWORD_2 | 趣鸭账号 2 密码 | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 收件人邮箱，多个用 `,` 分割 | 否 |
@@ -86,6 +95,7 @@ cp .env.example .env
 说明:
 
 - 不需要某个站点时，留空对应账号密码即可。
+- 趣鸭支持多账号，按 `QUYA_USERNAME_1` / `QUYA_PASSWORD_1` 编号配置；更多账号继续使用 `_3`、`_4`。
 - 通知方式可选，邮箱/PushPlus/Server酱可按需配置其一或多个。
 
 #### 3) 启动服务

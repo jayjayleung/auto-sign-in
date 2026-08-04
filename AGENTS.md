@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a single Maven module. Java code lives under `src/main/java/org/jayjay/autosignin/`: `task/` holds site-specific check-in flows, `entity/` message models, `util/` shared HTTP and notification helpers, and `MainApplication` orchestrates each run. Resources are in `src/main/resources/`, with assets in `static/`. `Dockerfile`, `entrypoint.sh`, and `docker-compose.yml` define container scheduling; CI is in `.github/workflows/auto.yml`. There is currently no `src/test` tree.
+This is a single Maven module. Java code lives under `src/main/java/org/jayjay/autosignin/`: `task/` holds site-specific check-in flows, `entity/` message models, `util/` shared HTTP and notification helpers, and `MainApplication` orchestrates each run. Tests mirror these packages under `src/test/java`. Resources are in `src/main/resources/`, with assets in `static/`. `Dockerfile`, `entrypoint.sh`, and `docker-compose.yml` define container scheduling; CI is in `.github/workflows/auto.yml`.
 
 ## Build, Test, and Development Commands
 
@@ -25,7 +25,7 @@ Use four-space indentation, UTF-8, and same-line braces. Keep packages lowercase
 
 ## Testing Guidelines
 
-JUnit 4.13.1 is available, but no conventional tests are checked in. Add new tests under `src/test/java` with `*Test.java` names and keep network, credential, and headless-browser calls out of unit tests; mock or isolate those boundaries. Run `mvn test` before opening a PR. There is no configured coverage threshold.
+Tests use JUnit 4.13.1 under `src/test/java` with `*Test.java` names. Keep network, credential, and headless-browser calls out of unit tests; mock or isolate those boundaries, as `QuyaCheckInTaskTest` does with a local HTTP server. Run `mvn test` before opening a PR. There is no configured coverage threshold.
 
 ## Security & Configuration
 

@@ -20,6 +20,10 @@ env:
   TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
   YH_USERNAME: ${{ secrets.YH_USERNAME }}
   YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
+  QUYA_USERNAME_1: ${{ secrets.QUYA_USERNAME_1 }}
+  QUYA_PASSWORD_1: ${{ secrets.QUYA_PASSWORD_1 }}
+  QUYA_USERNAME_2: ${{ secrets.QUYA_USERNAME_2 }}
+  QUYA_PASSWORD_2: ${{ secrets.QUYA_PASSWORD_2 }}
   EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
   EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
   EMAIL_TO: ${{ secrets.EMAIL_TO }}
@@ -45,4 +49,3 @@ jobs:
 
     - name: run with java 
       run: java -jar target/auto-sign-in-0.0.1-SNAPSHOT.jar
-

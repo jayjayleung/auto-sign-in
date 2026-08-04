@@ -3,6 +3,7 @@ package org.jayjay.autosignin;
 
 import org.jayjay.autosignin.entity.MessageList;
 import org.jayjay.autosignin.task.MoDbCheckInTask;
+import org.jayjay.autosignin.task.QuyaCheckInTask;
 import org.jayjay.autosignin.task.TiDbCheckInTask;
 import org.jayjay.autosignin.task.YongHoneCheckInTask;
 import org.jayjay.autosignin.util.MessageUtil;
@@ -17,6 +18,7 @@ public class MainApplication {
         List<MessageList> messages = new ArrayList<>();
         messages.add(new MoDbCheckInTask().run().getMsg());
         messages.add(new TiDbCheckInTask().run().getMsg());
+        messages.add(new QuyaCheckInTask().run().getMsg());
         messages.add(new YongHoneCheckInTask().run().getMsg());
         System.out.println("================================================================================================================");
         messages.stream().filter(MessageList::isSend).forEach(messageList-> {
