@@ -120,6 +120,7 @@ public class QuyaCheckInTask extends CheckInTask {
                 .set("password", account.password);
         JSONObject data = requestData(HttpRequest.post(loginUrl)
                 .headerMap(loginHeaders(), true)
+                .disableCookie()
                 .body(loginBody.toString())
                 .timeout(REQUEST_TIMEOUT)
                 .execute(), "登录");
@@ -142,14 +143,34 @@ public class QuyaCheckInTask extends CheckInTask {
                 + "&token=" + URLEncoder.encode(loginSession.accessToken, "UTF-8");
         HttpResponse response = HttpRequest.get(sessionUrl)
                 .headerMap(pointsPageHeaders(), true)
+                .disableCookie()
                 .timeout(REQUEST_TIMEOUT)
                 .execute();
         if (response.getStatus() < 200 || response.getStatus() >= 400) {
             throw new IllegalStateException("建立积分会话失败，HTTP " + response.getStatus());
         }
-        List<HttpCookie> cookies = new ArrayList<>(response.getCookies());
+        List<HttpCookie> cookies = responseCookies(response);
         if (CollUtil.isEmpty(cookies)) {
             throw new IllegalStateException("建立积分会话失败，未获取会话 Cookie");
+        }
+        return cookies;
+    }
+
+    /**
+     * 只读取本次响应下发的 Cookie，避免复用 Hutool 全局 Cookie 存储中的其他账号会话。
+     */
+    private static List<HttpCookie> responseCookies(HttpResponse response) {
+        List<HttpCookie> cookies = new ArrayList<>();
+        for (Map.Entry<String, List<String>> header : response.headers().entrySet()) {
+            if (header.getKey() == null || !"Set-Cookie".equalsIgnoreCase(header.getKey())
+                    || header.getValue() == null) {
+                continue;
+            }
+            for (String value : header.getValue()) {
+                if (StrUtil.isNotBlank(value)) {
+                    cookies.addAll(HttpCookie.parse(value));
+                }
+            }
         }
         return cookies;
     }

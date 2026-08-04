@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -31,11 +32,16 @@ public class QuyaCheckInTaskTest {
     private String baseUrl;
     private final Map<String, Boolean> checkedIn = new ConcurrentHashMap<>();
     private final AtomicInteger checkInRequests = new AtomicInteger();
+    private final AtomicReference<String> secondSessionRequestCookie = new AtomicReference<>();
+    private volatile boolean omitSecondSessionCookie;
 
     @Before
     public void setUp() throws IOException {
         checkedIn.put("1", true);
         checkedIn.put("2", false);
+        checkInRequests.set(0);
+        secondSessionRequestCookie.set(null);
+        omitSecondSessionCookie = false;
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/v1/auth/login", this::handleLogin);
         server.createContext("/points", this::handlePointsSession);
@@ -72,6 +78,29 @@ public class QuyaCheckInTaskTest {
         assertFalse(messages.toString().contains("password-two"));
         assertEquals(1, checkInRequests.get());
         assertTrue(checkedIn.get("2"));
+        assertTrue(secondSessionRequestCookie.get() == null || secondSessionRequestCookie.get().trim().isEmpty());
+    }
+
+    @Test
+    public void failsClosedWhenAccountDoesNotReceiveANewSessionCookie() {
+        omitSecondSessionCookie = true;
+        Map<String, String> environment = new HashMap<>();
+        environment.put("QUYA_USERNAME_1", "one@example.com");
+        environment.put("QUYA_PASSWORD_1", "password-one");
+        environment.put("QUYA_USERNAME_2", "two@example.com");
+        environment.put("QUYA_PASSWORD_2", "password-two");
+
+        QuyaCheckInTask task = new QuyaCheckInTask(environment, baseUrl, baseUrl);
+        task.run();
+
+        List<StringBuilder> messages = task.getListMessage();
+        assertEquals(2, messages.size());
+        assertTrue(messages.get(0).toString().contains("账号 1（one@example.com）：今日已签到"));
+        assertTrue(messages.get(1).toString().contains("账号 2（two@example.com）：签到失败 - 建立积分会话失败，未获取会话 Cookie"));
+        assertTrue(secondSessionRequestCookie.get() == null || secondSessionRequestCookie.get().trim().isEmpty());
+        assertEquals(0, checkInRequests.get());
+        assertFalse(messages.toString().contains("password-one"));
+        assertFalse(messages.toString().contains("password-two"));
     }
 
     @Test
@@ -103,7 +132,14 @@ public class QuyaCheckInTaskTest {
 
     private void handlePointsSession(HttpExchange exchange) throws IOException {
         String userId = queryValue(exchange.getRequestURI(), "user_id");
-        exchange.getResponseHeaders().add("Set-Cookie", "points_session=" + userId + "; Path=/; HttpOnly");
+        if ("2".equals(userId)) {
+            secondSessionRequestCookie.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            if (!omitSecondSessionCookie) {
+                exchange.getResponseHeaders().add("Set-Cookie", "points_session=" + userId + "; Path=/; HttpOnly");
+            }
+        } else {
+            exchange.getResponseHeaders().add("Set-Cookie", "points_session=" + userId + "; Path=/; HttpOnly");
+        }
         exchange.getResponseHeaders().add("Location", "/points?theme=light&lang=zh");
         exchange.sendResponseHeaders(302, -1);
         exchange.close();
