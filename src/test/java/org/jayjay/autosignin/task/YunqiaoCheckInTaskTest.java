@@ -26,7 +26,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class QuyaCheckInTaskTest {
+public class YunqiaoCheckInTaskTest {
 
     private HttpServer server;
     private String baseUrl;
@@ -59,15 +59,16 @@ public class QuyaCheckInTaskTest {
     @Test
     public void runsConfiguredAccountsIndependently() {
         Map<String, String> environment = new HashMap<>();
-        environment.put("QUYA_USERNAME_1", "one@example.com");
-        environment.put("QUYA_PASSWORD_1", "password-one");
-        environment.put("QUYA_USERNAME_2", "two@example.com");
-        environment.put("QUYA_PASSWORD_2", "password-two");
-        environment.put("QUYA_USERNAME_3", "incomplete@example.com");
+        environment.put("YUNQIAO_USERNAME_1", "one@example.com");
+        environment.put("YUNQIAO_PASSWORD_1", "password-one");
+        environment.put("YUNQIAO_USERNAME_2", "two@example.com");
+        environment.put("YUNQIAO_PASSWORD_2", "password-two");
+        environment.put("YUNQIAO_USERNAME_3", "incomplete@example.com");
 
-        QuyaCheckInTask task = new QuyaCheckInTask(environment, baseUrl, baseUrl);
+        YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
+        assertEquals("云桥积分签到", task.messageList().getTitle());
         List<StringBuilder> messages = task.getListMessage();
         assertEquals(3, messages.size());
         assertEquals("账号 1（one@example.com）：今日已签到，当前积分 3，连续签到 1 天", messages.get(0).toString());
@@ -85,12 +86,12 @@ public class QuyaCheckInTaskTest {
     public void failsClosedWhenAccountDoesNotReceiveANewSessionCookie() {
         omitSecondSessionCookie = true;
         Map<String, String> environment = new HashMap<>();
-        environment.put("QUYA_USERNAME_1", "one@example.com");
-        environment.put("QUYA_PASSWORD_1", "password-one");
-        environment.put("QUYA_USERNAME_2", "two@example.com");
-        environment.put("QUYA_PASSWORD_2", "password-two");
+        environment.put("YUNQIAO_USERNAME_1", "one@example.com");
+        environment.put("YUNQIAO_PASSWORD_1", "password-one");
+        environment.put("YUNQIAO_USERNAME_2", "two@example.com");
+        environment.put("YUNQIAO_PASSWORD_2", "password-two");
 
-        QuyaCheckInTask task = new QuyaCheckInTask(environment, baseUrl, baseUrl);
+        YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
         List<StringBuilder> messages = task.getListMessage();
@@ -106,12 +107,12 @@ public class QuyaCheckInTaskTest {
     @Test
     public void loadsAccountsInNumericOrder() {
         Map<String, String> environment = new HashMap<>();
-        environment.put("QUYA_PASSWORD_10", "ten-password");
-        environment.put("QUYA_USERNAME_2", "two@example.com");
-        environment.put("QUYA_PASSWORD_2", "two-password");
-        environment.put("QUYA_USERNAME_10", "ten@example.com");
+        environment.put("YUNQIAO_PASSWORD_10", "ten-password");
+        environment.put("YUNQIAO_USERNAME_2", "two@example.com");
+        environment.put("YUNQIAO_PASSWORD_2", "two-password");
+        environment.put("YUNQIAO_USERNAME_10", "ten@example.com");
 
-        List<QuyaCheckInTask.Account> accounts = QuyaCheckInTask.loadAccounts(environment);
+        List<YunqiaoCheckInTask.Account> accounts = YunqiaoCheckInTask.loadAccounts(environment);
 
         assertEquals(2, accounts.size());
         assertEquals(2, accounts.get(0).index);

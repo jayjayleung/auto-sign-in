@@ -3,8 +3,8 @@ package org.jayjay.autosignin;
 
 import org.jayjay.autosignin.entity.MessageList;
 import org.jayjay.autosignin.task.MoDbCheckInTask;
-import org.jayjay.autosignin.task.QuyaCheckInTask;
 import org.jayjay.autosignin.task.TiDbCheckInTask;
+import org.jayjay.autosignin.task.YunqiaoCheckInTask;
 import org.jayjay.autosignin.task.YongHoneCheckInTask;
 import org.jayjay.autosignin.util.MessageUtil;
 import org.jayjay.autosignin.util.RunLock;
@@ -32,9 +32,10 @@ public class MainApplication {
 
     private static void runTasks() {
         List<MessageList> messages = new ArrayList<>();
+        // 各站点独立执行并汇总结果，单个站点失败不会阻断其他站点。
         messages.add(new MoDbCheckInTask().run().getMsg());
         messages.add(new TiDbCheckInTask().run().getMsg());
-        messages.add(new QuyaCheckInTask().run().getMsg());
+        messages.add(new YunqiaoCheckInTask().run().getMsg());
         messages.add(new YongHoneCheckInTask().run().getMsg());
         System.out.println("================================================================================================================");
         messages.stream().filter(MessageList::isSend).forEach(messageList-> {

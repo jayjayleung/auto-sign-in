@@ -17,13 +17,15 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class QuyaCheckInTask extends CheckInTask {
+public class YunqiaoCheckInTask extends CheckInTask {
 
+    // 通过 quya.org 域名提供登录和积分接口。
     private static final String DEFAULT_API_BASE_URL = "https://api.quya.org";
     private static final String DEFAULT_POINTS_BASE_URL = "https://www.quya.org";
     private static final String CUSTOM_PAGE_URL = DEFAULT_API_BASE_URL + "/custom/93bbf0afef76f203";
-    private static final Pattern USERNAME_KEY = Pattern.compile("^QUYA_USERNAME_(\\d+)$");
-    private static final Pattern PASSWORD_KEY = Pattern.compile("^QUYA_PASSWORD_(\\d+)$");
+    // 账号配置按编号成对读取，例如 YUNQIAO_USERNAME_1 和 YUNQIAO_PASSWORD_1。
+    private static final Pattern USERNAME_KEY = Pattern.compile("^YUNQIAO_USERNAME_(\\d+)$");
+    private static final Pattern PASSWORD_KEY = Pattern.compile("^YUNQIAO_PASSWORD_(\\d+)$");
     private static final int REQUEST_TIMEOUT = 30000;
 
     private final Map<String, String> environment;
@@ -32,11 +34,11 @@ public class QuyaCheckInTask extends CheckInTask {
     private final String bootstrapUrl;
     private final String checkInUrl;
 
-    public QuyaCheckInTask() {
+    public YunqiaoCheckInTask() {
         this(System.getenv(), DEFAULT_API_BASE_URL, DEFAULT_POINTS_BASE_URL);
     }
 
-    QuyaCheckInTask(Map<String, String> environment, String apiBaseUrl, String pointsBaseUrl) {
+    YunqiaoCheckInTask(Map<String, String> environment, String apiBaseUrl, String pointsBaseUrl) {
         this.environment = environment;
         String normalizedApiBaseUrl = trimTrailingSlash(apiBaseUrl);
         String normalizedPointsBaseUrl = trimTrailingSlash(pointsBaseUrl);
@@ -48,19 +50,19 @@ public class QuyaCheckInTask extends CheckInTask {
 
     @Override
     public MessageList messageList() {
-        return new MessageList("趣鸭积分签到", listMessage);
+        return new MessageList("云桥积分签到", listMessage);
     }
 
     @Override
     public CheckInTask run() {
         List<Account> accounts = loadAccounts(environment);
         if (CollUtil.isEmpty(accounts)) {
-            System.out.println("趣鸭账号未配置，跳过签到");
+            System.out.println("云桥账号未配置，跳过签到");
             isRun = false;
             return this;
         }
 
-        System.out.println("趣鸭积分签到任务开始，账号数：" + accounts.size());
+        System.out.println("云桥积分签到任务开始，账号数：" + accounts.size());
         for (Account account : accounts) {
             if (!account.isComplete()) {
                 addMessage(accountLabel(account), "：用户名或密码配置不完整，已跳过");
@@ -70,15 +72,16 @@ public class QuyaCheckInTask extends CheckInTask {
                 checkIn(account);
             } catch (Exception e) {
                 String error = safeMessage(e.getMessage());
-                System.err.println("趣鸭账号 " + account.index + " 签到失败：" + error);
+                System.err.println("云桥账号 " + account.index + " 签到失败：" + error);
                 addMessage(accountLabel(account), "：签到失败 - ", error);
             }
         }
-        System.out.println("趣鸭积分签到任务结束");
+        System.out.println("云桥积分签到任务结束");
         return this;
     }
 
     private void checkIn(Account account) throws Exception {
+        // 登录令牌需先换取积分站点会话 Cookie，后续状态与签到请求共用该会话。
         LoginSession loginSession = login(account);
         List<HttpCookie> cookies = createPointsSession(loginSession);
         PointsStatus status = loadStatus(cookies);
@@ -226,6 +229,7 @@ public class QuyaCheckInTask extends CheckInTask {
 
     static List<Account> loadAccounts(Map<String, String> environment) {
         TreeMap<Integer, AccountValues> valuesByIndex = new TreeMap<>();
+        // TreeMap 保证多账号始终按编号执行，不受环境变量遍历顺序影响。
         for (Map.Entry<String, String> entry : environment.entrySet()) {
             Matcher usernameMatcher = USERNAME_KEY.matcher(entry.getKey());
             Matcher passwordMatcher = PASSWORD_KEY.matcher(entry.getKey());

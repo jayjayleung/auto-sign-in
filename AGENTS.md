@@ -25,7 +25,7 @@ Use four-space indentation, UTF-8, and same-line braces. Keep packages lowercase
 
 ## Testing Guidelines
 
-Tests use JUnit 4.13.1 under `src/test/java` with `*Test.java` names. Keep network, credential, and headless-browser calls out of unit tests; mock or isolate those boundaries, as `QuyaCheckInTaskTest` does with a local HTTP server. Run `mvn test` before opening a PR. There is no configured coverage threshold.
+Tests use JUnit 4.13.1 under `src/test/java` with `*Test.java` names. Keep network, credential, and headless-browser calls out of unit tests; mock or isolate those boundaries, as `YunqiaoCheckInTaskTest` does with a local HTTP server. Run `mvn test` before opening a PR. There is no configured coverage threshold.
 
 ## Security & Configuration
 
