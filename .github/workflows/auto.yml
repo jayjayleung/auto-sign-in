@@ -13,6 +13,10 @@ on:
     - cron: "11 23 * * *" # 北京时间上午07:11
   workflow_dispatch:
 
+concurrency:
+  group: auto-sign-in
+  cancel-in-progress: false
+
 env:
   MODB_USERNAME: ${{ secrets.MODB_USERNAME }}
   MODB_PASSWORD: ${{ secrets.MODB_PASSWORD }}
