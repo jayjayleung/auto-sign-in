@@ -11,6 +11,7 @@ import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.util.BrowserUtil;
 import org.jayjay.autosignin.util.MessageUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -138,7 +139,6 @@ public class YongHoneCheckInTask extends CheckInTask {
                     // document.querySelector("a[title='个人设置'].innerText")
                     //有bug,老是找不到节点
 //                    page.hover(".hl_member_avator");
-//                    page.waitForSelector("a[title='个人设置']");
 //                    Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
 //                    addMessage(lineMsg("用户名:").append(evaluate));
 //                    addMessage(lineMsg("洪豆:").append(page.$eval(".hl_member_in_status", "ele=>ele.innerText.replaceAll('\\n','')")));
@@ -170,9 +170,13 @@ public class YongHoneCheckInTask extends CheckInTask {
 //            page.waitForNavigation();
                 System.out.println("[永洪] 开始抽奖");
                 cj.click("#startbtn");
-                cj.waitForSelector("#main_messaqge");
-//            Thread.sleep(15000);
-                String cjMsg = cj.$eval("#main_messaqge div p", "ele=>ele.innerText").toString();
+                ElementHandle lotteryResult = BrowserUtil.waitForElement(cj, "#main_messaqge");
+                String cjMsg;
+                try {
+                    cjMsg = lotteryResult.$eval("div p", "ele=>ele.innerText").toString();
+                } finally {
+                    lotteryResult.dispose();
+                }
                 System.out.println("[永洪] 抽奖结果：" + cjMsg);
                 addMessage("抽奖结果：", cjMsg);
                 System.out.println("[永洪] 抽奖完成");
@@ -214,14 +218,9 @@ public class YongHoneCheckInTask extends CheckInTask {
             page.evaluate("document.querySelectorAll('#typeid_ctrl_menu li')[1].click()");
 
             page.type("#subject", title);
-            // 等待 iframe 加载并定位
-            ElementHandle iframeHandle = page.waitForSelector("iframe#e_iframe");
-            Frame frame = iframeHandle.contentFrame();
+            typeIntoEditor(page, content);
 
-            // 在 iframe 内操作
-            frame.$("body").type(content);
-
-            page.$("#postsubmit").click();
+            page.click("#postsubmit");
             boolean flag = false;
             for (int i = 0; i < 10; i++) {
                 if (page.url().equals(publishUrl)) {
@@ -237,7 +236,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                     System.out.println("[永洪] 开始发布" + title + "帖评论");
                     for (int i = 0; i < 3; i++) {
                         Thread.sleep(2000);
-                        page.$("#fastpostmessage").type(comment);
+                        page.type("#fastpostmessage", comment);
                         Thread.sleep(2000);
                         page.evaluate("document.getElementById('fastpostsubmit').click();");
                         Thread.sleep(2000);
@@ -270,14 +269,9 @@ public class YongHoneCheckInTask extends CheckInTask {
             page.evaluate("document.querySelectorAll('#typeid_ctrl_menu li')[1].click()");
 
             page.type("#subject", "签到");
-            // 等待 iframe 加载并定位
-            ElementHandle iframeHandle = page.waitForSelector("iframe#e_iframe");
-            Frame frame = iframeHandle.contentFrame();
+            typeIntoEditor(page, "签到");
 
-            // 在 iframe 内操作
-            frame.$("body").type("签到");
-
-            page.$("#postsubmit").click();
+            page.click("#postsubmit");
             boolean flag = false;
             for (int i = 0; i < 10; i++) {
                 if (page.url().equals(publishUrl)) {
@@ -292,7 +286,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 System.out.println("[永洪] 开始发布签到帖评论");
                 for (int i = 0; i < 3; i++) {
                     Thread.sleep(2000);
-                    page.$("#fastpostmessage").type("签到");
+                    page.type("#fastpostmessage", "签到");
 //                Thread.sleep(2000);
 //                page.$("#fastpostsubmit").click();
 //                page.evaluate("document.getElementById('fastpostmessage').innerText='签到'");
@@ -306,6 +300,28 @@ public class YongHoneCheckInTask extends CheckInTask {
         } catch (Exception e) {
             e.printStackTrace();
             addMessage("签到帖发布失败");
+        }
+    }
+
+    private void typeIntoEditor(Page page, String content) throws Exception {
+        ElementHandle iframeHandle = BrowserUtil.waitForElement(page, "iframe#e_iframe");
+        try {
+            Frame frame = iframeHandle.contentFrame();
+            if (frame == null) {
+                throw new IllegalStateException("永洪发帖编辑器 iframe 尚未加载完成");
+            }
+
+            ElementHandle body = frame.$("body");
+            if (body == null) {
+                throw new IllegalStateException("未找到永洪发帖编辑器正文区域");
+            }
+            try {
+                body.type(content);
+            } finally {
+                body.dispose();
+            }
+        } finally {
+            iframeHandle.dispose();
         }
     }
 }

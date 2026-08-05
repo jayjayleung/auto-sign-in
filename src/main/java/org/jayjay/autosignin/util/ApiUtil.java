@@ -200,9 +200,12 @@ public class ApiUtil {
 //            page.waitForNavigation();
             System.out.println("[永洪] 开始抽奖");
             cj.click("#startbtn");
-            cj.waitForSelector("#main_messaqge");
-//            Thread.sleep(15000);
-            System.out.println("[永洪] 抽奖结果：" + cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
+            ElementHandle lotteryResult = BrowserUtil.waitForElement(cj, "#main_messaqge");
+            try {
+                System.out.println("[永洪] 抽奖结果：" + lotteryResult.$eval("div p", "ele=>ele.innerText"));
+            } finally {
+                lotteryResult.dispose();
+            }
             System.out.println("[永洪] 抽奖完成");
 //            System.out.println(page.content());
             System.out.println(cj.url());
