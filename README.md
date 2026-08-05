@@ -155,7 +155,7 @@ docker compose down
 
 ### 方式二：本地直接运行 JAR（可选）
 
-如果你不想使用 Docker，也可以自行打包后通过系统定时任务运行 JAR。建议确保运行环境为 Java 17+，并通过 `crontab` 或 `systemd timer` 做定时触发。
+如果你不想使用 Docker，也可以自行打包后通过系统定时任务运行 JAR。构建需要 JDK 8+，运行需要 Java 8+，并可通过 `crontab` 或 `systemd timer` 做定时触发。
 
 ## 使用问题
 
