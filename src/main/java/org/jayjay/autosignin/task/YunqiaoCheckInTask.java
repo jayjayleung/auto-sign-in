@@ -29,6 +29,7 @@ public class YunqiaoCheckInTask extends CheckInTask {
     private static final Pattern USERNAME_KEY = Pattern.compile("^YUNQIAO_USERNAME_(\\d+)$");
     private static final Pattern PASSWORD_KEY = Pattern.compile("^YUNQIAO_PASSWORD_(\\d+)$");
     private static final int REQUEST_TIMEOUT = 30000;
+    private static final String MESSAGE_LINE_BREAK = "<br>";
 
     private final Map<String, String> environment;
     private final String loginUrl;
@@ -65,35 +66,42 @@ public class YunqiaoCheckInTask extends CheckInTask {
         }
 
         System.out.println("[云桥] 签到任务开始，账号数：" + accounts.size());
+        boolean showAccountIndex = accounts.size() > 1;
         for (Account account : accounts) {
+            StringBuilder message = lineMsg(accountLabel(account, showAccountIndex));
             if (!account.isComplete()) {
-                addMessage(accountLabel(account), "：用户名或密码配置不完整，已跳过");
+                appendMessageLine(message, "签到结果：已跳过");
+                appendMessageLine(message, "原因：用户名或密码配置不完整");
+                addMessage(message);
                 continue;
             }
             try {
-                checkIn(account);
+                checkIn(account, message);
             } catch (Exception e) {
                 String error = safeMessage(e.getMessage());
                 System.err.println("[云桥] 账号 " + account.index + " 签到失败：" + error);
-                addMessage(accountLabel(account), "：签到失败，原因：", error);
+                appendMessageLine(message, "签到结果：签到失败");
+                appendMessageLine(message, "原因：", error);
             }
+            addMessage(message);
         }
         System.out.println("[云桥] 签到任务结束");
         return this;
     }
 
-    private void checkIn(Account account) throws Exception {
+    private void checkIn(Account account, StringBuilder message) throws Exception {
         // 登录令牌需先换取积分站点会话 Cookie，后续状态与签到请求共用该会话。
         LoginSession loginSession = login(account);
         List<HttpCookie> cookies = createPointsSession(loginSession);
         PointsStatus status = loadStatus(cookies);
 
         if (status.checkedInToday) {
-            addMessage(statusMessage(account, "今日已签到", status, 0));
+            appendStatusLines(message, "今日已签到", status, 0);
             return;
         }
         if (!status.enabled) {
-            addMessage(accountLabel(account), "：积分功能未开启");
+            appendMessageLine(message, "签到结果：未执行");
+            appendMessageLine(message, "原因：积分功能未开启");
             return;
         }
 
@@ -109,14 +117,14 @@ public class YunqiaoCheckInTask extends CheckInTask {
         } catch (IllegalStateException e) {
             if (safeMessage(e.getMessage()).contains("已经签到")) {
                 PointsStatus currentStatus = loadStatus(cookies);
-                addMessage(statusMessage(account, "今日已签到", currentStatus, 0));
+                appendStatusLines(message, "今日已签到", currentStatus, 0);
                 return;
             }
             throw e;
         }
 
         PointsStatus updatedStatus = loadStatus(cookies);
-        addMessage(statusMessage(account, "签到成功", updatedStatus, streakBonus));
+        appendStatusLines(message, "签到成功", updatedStatus, streakBonus);
     }
 
     private LoginSession login(Account account) {
@@ -265,31 +273,34 @@ public class YunqiaoCheckInTask extends CheckInTask {
         return accounts;
     }
 
-    private static StringBuilder statusMessage(Account account, String result, PointsStatus status, int streakBonus) {
-        StringBuilder message = new StringBuilder(accountLabel(account))
-                .append("：")
-                .append(result)
-                .append("，当前积分 ")
-                .append(status.pointsBalance)
-                .append("，连续签到 ")
-                .append(status.currentStreak)
-                .append(" 天");
+    private static void appendStatusLines(StringBuilder message, String result,
+                                          PointsStatus status, int streakBonus) {
+        appendMessageLine(message, "当前积分：", String.valueOf(status.pointsBalance));
+        appendMessageLine(message, "连续签到：", String.valueOf(status.currentStreak), " 天");
+        appendMessageLine(message, "签到结果：", result);
         if (streakBonus > 0) {
-            message.append("，连续签到奖励 ").append(streakBonus).append(" 积分");
+            appendMessageLine(message, "连续签到奖励：", String.valueOf(streakBonus), " 积分");
         }
-        return message;
     }
 
-    private static String accountLabel(Account account) {
-        String label = "账号 " + account.index;
+    private static void appendMessageLine(StringBuilder message, String... parts) {
+        message.append(MESSAGE_LINE_BREAK);
+        for (String part : parts) {
+            message.append(part);
+        }
+    }
+
+    private static String accountLabel(Account account, boolean showAccountIndex) {
+        String label = showAccountIndex ? "账号 " + account.index : "账号";
+        String boldLabel = "<strong>" + label + "</strong>";
         if (StrUtil.isBlank(account.username)) {
-            return label;
+            return boldLabel;
         }
         String username = account.username.replaceAll("[\\r\\n<>]+", "");
         if (username.length() > 100) {
             username = username.substring(0, 100) + "...";
         }
-        return label + "（" + username + "）";
+        return boldLabel + "（" + username + "）";
     }
 
     private static int numberValue(JSONObject object, String key) {

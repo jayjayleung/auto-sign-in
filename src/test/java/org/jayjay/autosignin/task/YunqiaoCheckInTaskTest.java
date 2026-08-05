@@ -71,15 +71,47 @@ public class YunqiaoCheckInTaskTest {
         assertEquals("云桥签到", task.messageList().getTitle());
         List<StringBuilder> messages = task.getListMessage();
         assertEquals(3, messages.size());
-        assertEquals("账号 1（one@example.com）：今日已签到，当前积分 3，连续签到 1 天", messages.get(0).toString());
-        assertEquals("账号 2（two@example.com）：签到成功，当前积分 3，连续签到 1 天", messages.get(1).toString());
-        assertTrue(messages.get(2).toString().contains("账号 3（incomplete@example.com）：用户名或密码配置不完整"));
+        assertEquals("<strong>账号 1</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到", messages.get(0).toString());
+        assertEquals("<strong>账号 2</strong>（two@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：签到成功<br>连续签到奖励：2 积分", messages.get(1).toString());
+        assertEquals("<strong>账号 3</strong>（incomplete@example.com）<br>签到结果：已跳过<br>原因：用户名或密码配置不完整", messages.get(2).toString());
         assertFalse(messages.toString().contains("总积分"));
         assertFalse(messages.toString().contains("password-one"));
         assertFalse(messages.toString().contains("password-two"));
         assertEquals(1, checkInRequests.get());
         assertTrue(checkedIn.get("2"));
         assertTrue(secondSessionRequestCookie.get() == null || secondSessionRequestCookie.get().trim().isEmpty());
+    }
+
+    @Test
+    public void hidesAccountIndexWhenOnlyOneAccountRuns() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME", "one@example.com");
+        environment.put("YUNQIAO_PASSWORD", "password-one");
+
+        YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
+        task.run();
+
+        assertEquals(1, task.getListMessage().size());
+        assertEquals(
+                "<strong>账号</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到",
+                task.getListMessage().get(0).toString()
+        );
+    }
+
+    @Test
+    public void hidesAccountIndexWhenOnlyOneNumberedAccountRuns() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME_2", "one@example.com");
+        environment.put("YUNQIAO_PASSWORD_2", "password-one");
+
+        YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
+        task.run();
+
+        assertEquals(1, task.getListMessage().size());
+        assertEquals(
+                "<strong>账号</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到",
+                task.getListMessage().get(0).toString()
+        );
     }
 
     @Test
@@ -96,8 +128,8 @@ public class YunqiaoCheckInTaskTest {
 
         List<StringBuilder> messages = task.getListMessage();
         assertEquals(2, messages.size());
-        assertTrue(messages.get(0).toString().contains("账号 1（one@example.com）：今日已签到"));
-        assertTrue(messages.get(1).toString().contains("账号 2（two@example.com）：签到失败，原因：建立积分会话失败，未获取会话 Cookie"));
+        assertEquals("<strong>账号 1</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到", messages.get(0).toString());
+        assertEquals("<strong>账号 2</strong>（two@example.com）<br>签到结果：签到失败<br>原因：建立积分会话失败，未获取会话 Cookie", messages.get(1).toString());
         assertTrue(secondSessionRequestCookie.get() == null || secondSessionRequestCookie.get().trim().isEmpty());
         assertEquals(0, checkInRequests.get());
         assertFalse(messages.toString().contains("password-one"));
@@ -219,7 +251,10 @@ public class YunqiaoCheckInTaskTest {
 
         assertTrue(task.isRun());
         assertEquals(1, task.getListMessage().size());
-        assertTrue(task.getListMessage().get(0).toString().contains("用户名或密码配置不完整，已跳过"));
+        assertEquals(
+                "<strong>账号</strong>（incomplete@example.com）<br>签到结果：已跳过<br>原因：用户名或密码配置不完整",
+                task.getListMessage().get(0).toString()
+        );
         assertEquals(0, checkInRequests.get());
     }
 
@@ -268,7 +303,7 @@ public class YunqiaoCheckInTaskTest {
             return;
         }
         checkedIn.put(userId, true);
-        writeJson(exchange, success(JSONUtil.createObj().set("streak_bonus", 0)));
+        writeJson(exchange, success(JSONUtil.createObj().set("streak_bonus", 2)));
     }
 
     private static JSONObject success(JSONObject data) {
