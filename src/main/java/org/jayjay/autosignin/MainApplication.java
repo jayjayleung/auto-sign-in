@@ -19,8 +19,8 @@ public class MainApplication {
         // 各站点独立执行并汇总结果，单个站点失败不会阻断其他站点。
         messages.add(new MoDbCheckInTask().run().getMsg());
         messages.add(new TiDbCheckInTask().run().getMsg());
-        messages.add(new YunqiaoCheckInTask().run().getMsg());
         messages.add(new YongHoneCheckInTask().run().getMsg());
+        messages.add(new YunqiaoCheckInTask().run().getMsg());
         System.out.println("================================================================================================================");
         messages.stream().filter(MessageList::isSend).forEach(messageList-> {
             System.out.println(messageList.getTitle());
