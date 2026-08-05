@@ -4,6 +4,8 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.jayjay.autosignin.entity.MessageBlock;
+import org.jayjay.autosignin.entity.MessageLine;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -68,12 +70,15 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        assertEquals("云桥签到", task.messageList().getTitle());
-        List<StringBuilder> messages = task.getListMessage();
+        assertEquals("云桥签到", task.buildNotificationSection().getTitle());
+        List<MessageBlock> messages = task.getMessageBlocks();
         assertEquals(3, messages.size());
-        assertEquals("<strong>账号 1</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到", messages.get(0).toString());
-        assertEquals("<strong>账号 2</strong>（two@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：签到成功<br>连续签到奖励：2 积分", messages.get(1).toString());
-        assertEquals("<strong>账号 3</strong>（incomplete@example.com）<br>签到结果：已跳过<br>原因：用户名或密码配置不完整", messages.get(2).toString());
+        assertEquals("账号 1（one@example.com）\n当前积分：3\n连续签到：1 天\n签到结果：今日已签到", messages.get(0).toString());
+        assertEquals("账号 2（two@example.com）\n当前积分：3\n连续签到：1 天\n签到结果：签到成功\n连续签到奖励：2 积分", messages.get(1).toString());
+        assertEquals("账号 3（incomplete@example.com）\n签到结果：已跳过\n原因：用户名或密码配置不完整", messages.get(2).toString());
+        assertAccountLine(messages.get(0), "账号 1", "（one@example.com）");
+        assertAccountLine(messages.get(1), "账号 2", "（two@example.com）");
+        assertAccountLine(messages.get(2), "账号 3", "（incomplete@example.com）");
         assertFalse(messages.toString().contains("总积分"));
         assertFalse(messages.toString().contains("password-one"));
         assertFalse(messages.toString().contains("password-two"));
@@ -91,11 +96,12 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        assertEquals(1, task.getListMessage().size());
+        assertEquals(1, task.getMessageBlocks().size());
         assertEquals(
-                "<strong>账号</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到",
-                task.getListMessage().get(0).toString()
+                "账号（one@example.com）\n当前积分：3\n连续签到：1 天\n签到结果：今日已签到",
+                task.getMessageBlocks().get(0).toString()
         );
+        assertAccountLine(task.getMessageBlocks().get(0), "账号", "（one@example.com）");
     }
 
     @Test
@@ -107,11 +113,12 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        assertEquals(1, task.getListMessage().size());
+        assertEquals(1, task.getMessageBlocks().size());
         assertEquals(
-                "<strong>账号</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到",
-                task.getListMessage().get(0).toString()
+                "账号（one@example.com）\n当前积分：3\n连续签到：1 天\n签到结果：今日已签到",
+                task.getMessageBlocks().get(0).toString()
         );
+        assertAccountLine(task.getMessageBlocks().get(0), "账号", "（one@example.com）");
     }
 
     @Test
@@ -126,10 +133,10 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        List<StringBuilder> messages = task.getListMessage();
+        List<MessageBlock> messages = task.getMessageBlocks();
         assertEquals(2, messages.size());
-        assertEquals("<strong>账号 1</strong>（one@example.com）<br>当前积分：3<br>连续签到：1 天<br>签到结果：今日已签到", messages.get(0).toString());
-        assertEquals("<strong>账号 2</strong>（two@example.com）<br>签到结果：签到失败<br>原因：建立积分会话失败，未获取会话 Cookie", messages.get(1).toString());
+        assertEquals("账号 1（one@example.com）\n当前积分：3\n连续签到：1 天\n签到结果：今日已签到", messages.get(0).toString());
+        assertEquals("账号 2（two@example.com）\n签到结果：签到失败\n原因：建立积分会话失败，未获取会话 Cookie", messages.get(1).toString());
         assertTrue(secondSessionRequestCookie.get() == null || secondSessionRequestCookie.get().trim().isEmpty());
         assertEquals(0, checkInRequests.get());
         assertFalse(messages.toString().contains("password-one"));
@@ -235,8 +242,8 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        assertFalse(task.isRun());
-        assertTrue(task.getListMessage().isEmpty());
+        assertFalse(task.isEnabled());
+        assertTrue(task.getMessageBlocks().isEmpty());
         assertEquals(0, checkInRequests.get());
     }
 
@@ -249,13 +256,23 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        assertTrue(task.isRun());
-        assertEquals(1, task.getListMessage().size());
+        assertTrue(task.isEnabled());
+        assertEquals(1, task.getMessageBlocks().size());
         assertEquals(
-                "<strong>账号</strong>（incomplete@example.com）<br>签到结果：已跳过<br>原因：用户名或密码配置不完整",
-                task.getListMessage().get(0).toString()
+                "账号（incomplete@example.com）\n签到结果：已跳过\n原因：用户名或密码配置不完整",
+                task.getMessageBlocks().get(0).toString()
         );
+        assertAccountLine(task.getMessageBlocks().get(0), "账号", "（incomplete@example.com）");
         assertEquals(0, checkInRequests.get());
+    }
+
+    private static void assertAccountLine(MessageBlock block, String label, String account) {
+        MessageLine line = block.getLines().get(0);
+        assertEquals(2, line.getParts().size());
+        assertEquals(label, line.getParts().get(0).getText());
+        assertTrue(line.getParts().get(0).isBold());
+        assertEquals(account, line.getParts().get(1).getText());
+        assertFalse(line.getParts().get(1).isBold());
     }
 
     private void handleLogin(HttpExchange exchange) throws IOException {

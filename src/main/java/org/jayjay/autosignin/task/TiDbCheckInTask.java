@@ -7,7 +7,8 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.entity.MessageLine;
+import org.jayjay.autosignin.entity.NotificationSection;
 
 import java.net.HttpCookie;
 import java.util.List;
@@ -25,8 +26,8 @@ public class TiDbCheckInTask extends CheckInTask {
     String redirectTo = "https://pingkai.cn/tidbcommunity/member";
 
     @Override
-    public MessageList messageList() {
-        return new MessageList("TiDB 签到", listMessage);
+    public NotificationSection buildNotificationSection() {
+        return new NotificationSection("TiDB 签到", messageBlocks);
     }
 
     @Override
@@ -37,7 +38,7 @@ public class TiDbCheckInTask extends CheckInTask {
             String tidbPassword = System.getenv("TIDB_PASSWORD");
             if (StrUtil.isBlank(tidbUsername) || StrUtil.isBlank(tidbPassword)) {
                 System.out.println("[TiDB] 用户名或密码未配置，跳过签到");
-                isRun = !isRun;
+                enabled = false;
                 return this;
             }
             System.out.println("[TiDB] 开始登录");
@@ -64,7 +65,7 @@ public class TiDbCheckInTask extends CheckInTask {
                     .header("x-csrftoken", loginRes.getCookieValue("csrftoken")).execute();
             if (meRes.isOk()) {
                 JSONObject userBody = toJSON(meRes.body());
-                addMessage(lineMsg("用户名：").append(userBody.getJSONObject("data").getStr("username")));
+                addMessage("用户名：", userBody.getJSONObject("data").getStr("username"));
             }
             HttpResponse pointRes = HttpRequest.get(pointsUrl).cookie(cookies).headerMap(checkInHeaders(), true).execute();
             if (pointRes.isOk()) {
@@ -78,13 +79,13 @@ public class TiDbCheckInTask extends CheckInTask {
                     .execute();
             JSONObject checkInBody = toJSON(checkInRes.body());
             System.out.println("[TiDB] 签到结果：" + checkInBody.getStr("detail"));
-            StringBuilder checkInMsg = lineMsg("签到结果：").append(checkInBody.getStr("detail"));
-            addMessage(checkInMsg);
+            addMessage("签到结果：", checkInBody.getStr("detail"));
             JSONObject data = checkInBody.getJSONObject("data");
             if (data != null && data.containsKey("points")) {
-                StringBuilder points = lineMsg("本次获得 ").append(data.getStr("points")).append(" 积分");
+                MessageLine points = new MessageLine()
+                        .append("本次获得 ", data.getStr("points"), " 积分");
                 if (data.containsKey("tomorrow_points")) {
-                    points.append("，明日签到可获得 ").append(data.getStr("tomorrow_points")).append(" 积分");
+                    points.append("，明日签到可获得 ", data.getStr("tomorrow_points"), " 积分");
                 }
                 addMessage(points);
             }

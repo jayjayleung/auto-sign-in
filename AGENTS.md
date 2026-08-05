@@ -21,7 +21,7 @@ docker compose down
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation, UTF-8, and same-line braces. Keep packages lowercase; use `PascalCase` for classes, `camelCase` for methods and variables, and `UPPER_SNAKE_CASE` for constants and environment keys. Put site behavior in a `CheckInTask` subclass, shared request/JSON code in `CheckInTask` or `ApiUtil`, and delivery changes in `MessageUtil`. No formatter or linter is configured, so preserve local formatting.
+Use four-space indentation, UTF-8, and same-line braces. Keep packages lowercase; use `PascalCase` for classes, `camelCase` for methods and variables, and `UPPER_SNAKE_CASE` for constants and environment keys. Put site behavior in a `CheckInTask` subclass, shared request/JSON code in `CheckInTask` or `ApiUtil`, and delivery changes in `NotificationSender`. No formatter or linter is configured, so preserve local formatting.
 
 ## Testing Guidelines
 

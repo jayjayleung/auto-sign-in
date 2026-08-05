@@ -7,8 +7,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.jayjay.autosignin.entity.MessageList;
-import org.jayjay.autosignin.util.MessageUtil;
+import org.jayjay.autosignin.entity.NotificationSection;
 import org.junit.Test;
 
 import javax.crypto.Cipher;
@@ -39,8 +38,8 @@ public class MoDbCheckInTask extends CheckInTask {
 
 
     @Override
-    public MessageList messageList() {
-        return new MessageList("墨天轮签到", listMessage);
+    public NotificationSection buildNotificationSection() {
+        return new NotificationSection("墨天轮签到", messageBlocks);
     }
 
     @Test()
@@ -58,7 +57,7 @@ public class MoDbCheckInTask extends CheckInTask {
             String modbPassword = System.getenv("MODB_PASSWORD");
             if (StrUtil.isBlank(modbUsername) || StrUtil.isBlank(modbPassword)) {
                 System.out.println("[墨天轮] 用户名或密码未配置，跳过签到");
-                isRun = !isRun;
+                enabled = false;
                 return this;
             }
             System.out.println("[墨天轮] 开始登录");
@@ -85,8 +84,7 @@ public class MoDbCheckInTask extends CheckInTask {
                     .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
             if (userRes.isOk()) {
                 JSONObject userBody = toJSON(userRes.body());
-                StringBuilder account = lineMsg("用户名：").append(userBody.getStr("account"));
-                addMessage(account);
+                addMessage("用户名：", userBody.getStr("account"));
                 addMessage("墨值：", userBody.getStr("point"));
             }
             //获取aes加密时间戳
@@ -119,16 +117,11 @@ public class MoDbCheckInTask extends CheckInTask {
             }
             JSONObject checkInBody = toJSON(body);
             String str = checkInBody.getStr("operateMessage");
+            if (StrUtil.isBlank(str)) {
+                throw new IllegalStateException("签到响应缺少 operateMessage");
+            }
             System.out.println("[墨天轮] 签到结果：" + str);
-            StringBuilder checkInMsg = lineMsg(str);
-
-//        if(checkInBody.containsKey("operateCallBackObj")){
-//            JSONObject operateCallBackObj = checkInBody.getJSONObject("operateCallBackObj");
-//            if(operateCallBackObj!=null && operateCallBackObj.containsKey("point")){
-//                checkInMsg.append("当前墨值：").append(operateCallBackObj.getStr("point")).append(MessageUtil.lineEnd);
-//            }
-//        }
-            addMessage(checkInMsg);
+            addMessage(str);
             System.out.println("[墨天轮] 签到任务结束");
         } catch (Exception e) {
             e.printStackTrace();

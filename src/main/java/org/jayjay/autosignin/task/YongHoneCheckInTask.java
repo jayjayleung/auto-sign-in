@@ -10,9 +10,8 @@ import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.entity.NotificationSection;
 import org.jayjay.autosignin.util.BrowserUtil;
-import org.jayjay.autosignin.util.MessageUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
@@ -38,8 +37,8 @@ public class YongHoneCheckInTask extends CheckInTask {
     String publishUrl = "https://club.yonghongtech.com/forum.php?mod=post&action=newthread&fid=80";
 
     @Override
-    public MessageList messageList() {
-        return new MessageList("永洪签到", listMessage);
+    public NotificationSection buildNotificationSection() {
+        return new NotificationSection("永洪签到", messageBlocks);
     }
 
     @Test
@@ -53,14 +52,14 @@ public class YongHoneCheckInTask extends CheckInTask {
         while (!success && retryCount <= maxRetries) {
             if (retryCount > 0) {
                 System.out.println("[永洪] 出现异常，正在进行第 " + retryCount + " 次重试");
-                listMessage.clear();
+                clearMessages();
             }
             System.out.println("[永洪] 签到任务开始");
             String yhUsername = System.getenv("YH_USERNAME");
             String yhPassword = System.getenv("YH_PASSWORD");
             if (StrUtil.isBlank(yhUsername) || StrUtil.isBlank(yhPassword)) {
                 System.out.println("[永洪] 用户名或密码未配置，跳过签到");
-                isRun = !isRun;
+                enabled = false;
                 return this;
             }
 
@@ -131,17 +130,15 @@ public class YongHoneCheckInTask extends CheckInTask {
                     Document document = Jsoup.parse(page.content());
                     Elements me = document.select(".nex_Home_intel h5");
                     if (me != null) {
-                        String user = me.text().replaceAll(MessageUtil.lineEnd, "");
+                        String user = me.text().replaceAll("[\\r\\n]+", "");
                         System.out.println(user);
-                        addMessage(lineMsg("用户名：").append(user));
+                        addMessage("用户名：", user);
                     }
 
                     // document.querySelector("a[title='个人设置'].innerText")
                     //有bug,老是找不到节点
 //                    page.hover(".hl_member_avator");
 //                    Object evaluate = page.$eval("a[title='个人设置']", "ele=>ele.innerText.replaceAll('\\n','')");
-//                    addMessage(lineMsg("用户名:").append(evaluate));
-//                    addMessage(lineMsg("洪豆:").append(page.$eval(".hl_member_in_status", "ele=>ele.innerText.replaceAll('\\n','')")));
 //                Page card = browser.newPage();
 //                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
@@ -164,7 +161,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                     String pointStr = point.text();
                     if (StrUtil.isNotBlank(pointStr)) {
                         System.out.println(pointStr);
-                        addMessage(lineMsg("洪豆：").append(pointStr));
+                        addMessage("洪豆：", pointStr);
                     }
                 }
 //            page.waitForNavigation();
@@ -195,7 +192,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 retryCount++;
                 sleep(delay);
                 delay *= 2; // 延迟指数增加
-                listMessage.clear();
+                clearMessages();
                 if (retryCount >= maxRetries) {
                     addMessage("永洪签到失败，请查看日志");
                 }

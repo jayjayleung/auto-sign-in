@@ -6,7 +6,9 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.entity.MessageBlock;
+import org.jayjay.autosignin.entity.MessageLine;
+import org.jayjay.autosignin.entity.NotificationSection;
 
 import java.net.HttpCookie;
 import java.net.URLEncoder;
@@ -29,7 +31,6 @@ public class YunqiaoCheckInTask extends CheckInTask {
     private static final Pattern USERNAME_KEY = Pattern.compile("^YUNQIAO_USERNAME_(\\d+)$");
     private static final Pattern PASSWORD_KEY = Pattern.compile("^YUNQIAO_PASSWORD_(\\d+)$");
     private static final int REQUEST_TIMEOUT = 30000;
-    private static final String MESSAGE_LINE_BREAK = "<br>";
 
     private final Map<String, String> environment;
     private final String loginUrl;
@@ -52,8 +53,8 @@ public class YunqiaoCheckInTask extends CheckInTask {
     }
 
     @Override
-    public MessageList messageList() {
-        return new MessageList("云桥签到", listMessage);
+    public NotificationSection buildNotificationSection() {
+        return new NotificationSection("云桥签到", messageBlocks);
     }
 
     @Override
@@ -61,14 +62,14 @@ public class YunqiaoCheckInTask extends CheckInTask {
         List<Account> accounts = loadAccounts(environment);
         if (CollUtil.isEmpty(accounts)) {
             System.out.println("[云桥] 账号未配置，跳过签到");
-            isRun = false;
+            enabled = false;
             return this;
         }
 
         System.out.println("[云桥] 签到任务开始，账号数：" + accounts.size());
         boolean showAccountIndex = accounts.size() > 1;
         for (Account account : accounts) {
-            StringBuilder message = lineMsg(accountLabel(account, showAccountIndex));
+            MessageBlock message = new MessageBlock().addLine(accountLine(account, showAccountIndex));
             if (!account.isComplete()) {
                 appendMessageLine(message, "签到结果：已跳过");
                 appendMessageLine(message, "原因：用户名或密码配置不完整");
@@ -89,7 +90,7 @@ public class YunqiaoCheckInTask extends CheckInTask {
         return this;
     }
 
-    private void checkIn(Account account, StringBuilder message) throws Exception {
+    private void checkIn(Account account, MessageBlock message) throws Exception {
         // 登录令牌需先换取积分站点会话 Cookie，后续状态与签到请求共用该会话。
         LoginSession loginSession = login(account);
         List<HttpCookie> cookies = createPointsSession(loginSession);
@@ -273,7 +274,7 @@ public class YunqiaoCheckInTask extends CheckInTask {
         return accounts;
     }
 
-    private static void appendStatusLines(StringBuilder message, String result,
+    private static void appendStatusLines(MessageBlock message, String result,
                                           PointsStatus status, int streakBonus) {
         appendMessageLine(message, "当前积分：", String.valueOf(status.pointsBalance));
         appendMessageLine(message, "连续签到：", String.valueOf(status.currentStreak), " 天");
@@ -283,24 +284,21 @@ public class YunqiaoCheckInTask extends CheckInTask {
         }
     }
 
-    private static void appendMessageLine(StringBuilder message, String... parts) {
-        message.append(MESSAGE_LINE_BREAK);
-        for (String part : parts) {
-            message.append(part);
-        }
+    private static void appendMessageLine(MessageBlock message, String... parts) {
+        message.addLine(parts);
     }
 
-    private static String accountLabel(Account account, boolean showAccountIndex) {
+    private static MessageLine accountLine(Account account, boolean showAccountIndex) {
         String label = showAccountIndex ? "账号 " + account.index : "账号";
-        String boldLabel = "<strong>" + label + "</strong>";
+        MessageLine line = new MessageLine().appendBold(label);
         if (StrUtil.isBlank(account.username)) {
-            return boldLabel;
+            return line;
         }
         String username = account.username.replaceAll("[\\r\\n<>]+", "");
         if (username.length() > 100) {
             username = username.substring(0, 100) + "...";
         }
-        return boldLabel + "（" + username + "）";
+        return line.append("（", username, "）");
     }
 
     private static int numberValue(JSONObject object, String key) {

@@ -4,7 +4,9 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
-import org.jayjay.autosignin.entity.MessageList;
+import org.jayjay.autosignin.entity.MessageBlock;
+import org.jayjay.autosignin.entity.MessageLine;
+import org.jayjay.autosignin.entity.NotificationSection;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -18,10 +20,12 @@ public abstract class CheckInTask {
     static final String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82";
 
 
-    List<StringBuilder> listMessage = new ArrayList<>();
+    /** 当前签到任务产生的渠道无关消息块。 */
+    final List<MessageBlock> messageBlocks = new ArrayList<>();
 
 
-    boolean isRun = true;
+    /** 当前任务是否启用；缺少必要配置时会关闭该任务的通知分组。 */
+    boolean enabled = true;
 
 
     abstract CheckInTask run() throws IOException, InterruptedException;
@@ -60,21 +64,34 @@ public abstract class CheckInTask {
     }
 
 
-    public void addMessage(StringBuilder message) {
-        listMessage.add(message);
+    /**
+     * 添加一条简单的单行消息，适用于不需要局部加粗或多行布局的结果。
+     */
+    protected void addMessage(String... message) {
+        addMessage(new MessageBlock().addLine(message));
     }
 
-    public void addMessage(String... message) {
-        StringBuilder sb = new StringBuilder();
-        for (String s : message) {
-            sb.append(s);
+    /**
+     * 添加完整消息块，适用于多行内容或包含加粗片段的复杂结果。
+     */
+    protected void addMessage(MessageBlock message) {
+        if (message != null && !message.isBlank()) {
+            messageBlocks.add(message);
         }
-        listMessage.add(sb);
     }
 
+    /**
+     * 将一条已包含样式语义的消息行包装为独立消息块后添加。
+     */
+    protected void addMessage(MessageLine message) {
+        addMessage(new MessageBlock().addLine(message));
+    }
 
-    public StringBuilder lineMsg(String message) {
-        return new StringBuilder(message);
+    /**
+     * 清空当前任务已收集的消息，供需要重试并替换中间结果的任务使用。
+     */
+    protected void clearMessages() {
+        messageBlocks.clear();
     }
 
 
@@ -86,12 +103,18 @@ public abstract class CheckInTask {
         }
     }
 
-    public MessageList getMsg() {
-        return isRun ? messageList() : new MessageList();
+    /**
+     * 返回当前任务可发送的通知分组；未启用的任务返回空分组并跳过通知。
+     */
+    public NotificationSection getNotificationSection() {
+        return enabled ? buildNotificationSection() : new NotificationSection();
     }
 
-    public MessageList messageList() {
-        return new MessageList("签到", listMessage);
+    /**
+     * 将当前任务标题和消息块组装为通知结果，子类可覆盖标题。
+     */
+    public NotificationSection buildNotificationSection() {
+        return new NotificationSection("签到", messageBlocks);
     }
 
 }
