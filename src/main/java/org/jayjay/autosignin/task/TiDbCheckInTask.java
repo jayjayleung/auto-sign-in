@@ -26,21 +26,21 @@ public class TiDbCheckInTask extends CheckInTask {
 
     @Override
     public MessageList messageList() {
-        return new MessageList("Tidb 签到", listMessage);
+        return new MessageList("TiDB 签到", listMessage);
     }
 
     @Override
     public CheckInTask run() {
         try {
-            System.out.println("TiDb 签到任务开始");
+            System.out.println("[TiDB] 签到任务开始");
             String tidbUsername = System.getenv("TIDB_USERNAME");
             String tidbPassword = System.getenv("TIDB_PASSWORD");
             if (StrUtil.isBlank(tidbUsername) || StrUtil.isBlank(tidbPassword)) {
-                System.out.println("TiDb 账号密码未配置，跳过签到");
+                System.out.println("[TiDB] 用户名或密码未配置，跳过签到");
                 isRun = !isRun;
                 return this;
             }
-            System.out.println("开始登录...");
+            System.out.println("[TiDB] 开始登录");
             JSONObject bodyJson = JSONUtil.createObj();
             bodyJson.set("identifier", tidbUsername);
             bodyJson.set("password", tidbPassword);
@@ -48,18 +48,15 @@ public class TiDbCheckInTask extends CheckInTask {
             HttpResponse loginRes = HttpRequest.post(loginUrl).headerMap(headers(), true)
                     .body(bodyJson.toString())
                     .execute();
-            System.out.println(loginRes.body());
             if (!loginRes.isOk()) {
-                System.out.println("TiDb 登录失败！");
-                addMessage("TiDb 签到失败！请检查日志!!!");
+                System.err.println("[TiDB] 登录失败，HTTP " + loginRes.getStatus());
+                addMessage("TiDB 签到失败，请查看日志");
                 return this;
             }
 
             JSONObject loginBody = toJSON(loginRes.body());
-            System.out.println(loginBody);
-            System.out.println(loginBody.getStr("detail"));
+            System.out.println("[TiDB] 登录结果：" + loginBody.getStr("detail"));
             List<HttpCookie> cookies = loginRes.getCookies();
-            cookies.forEach(System.out::println);
             Map<String, String> checkInHeaders = checkInHeaders();
             checkInHeaders.put("x-csrftoken", loginRes.getCookieValue("csrftoken"));
 //        sleep(1000);
@@ -67,7 +64,6 @@ public class TiDbCheckInTask extends CheckInTask {
                     .header("x-csrftoken", loginRes.getCookieValue("csrftoken")).execute();
             if (meRes.isOk()) {
                 JSONObject userBody = toJSON(meRes.body());
-                System.out.println(userBody);
                 addMessage(lineMsg("用户名：").append(userBody.getJSONObject("data").getStr("username")));
             }
             HttpResponse pointRes = HttpRequest.get(pointsUrl).cookie(cookies).headerMap(checkInHeaders(), true).execute();
@@ -75,27 +71,27 @@ public class TiDbCheckInTask extends CheckInTask {
                 JSONObject pointBody = toJSON(pointRes.body());
                 addMessage("当前积分：", pointBody.getJSONObject("data").getStr("current_points"));
             }
-            System.out.println("开始签到...");
+            System.out.println("[TiDB] 开始签到");
             HttpResponse checkInRes = HttpRequest.post(checkInUrl)
                     .cookie(cookies)
                     .headerMap(checkInHeaders, true)
                     .execute();
             JSONObject checkInBody = toJSON(checkInRes.body());
-            System.out.println(checkInBody);
-            StringBuilder checkInMsg = lineMsg("签到：").append(checkInBody.getStr("detail"));
+            System.out.println("[TiDB] 签到结果：" + checkInBody.getStr("detail"));
+            StringBuilder checkInMsg = lineMsg("签到结果：").append(checkInBody.getStr("detail"));
             addMessage(checkInMsg);
             JSONObject data = checkInBody.getJSONObject("data");
             if (data != null && data.containsKey("points")) {
-                StringBuilder points = lineMsg("获得").append(data.getStr("points")).append("积分");
+                StringBuilder points = lineMsg("本次获得 ").append(data.getStr("points")).append(" 积分");
                 if (data.containsKey("tomorrow_points")) {
-                    points.append("，明天签到获得").append(data.getStr("tomorrow_points")).append("积分");
+                    points.append("，明日签到可获得 ").append(data.getStr("tomorrow_points")).append(" 积分");
                 }
                 addMessage(points);
             }
-            System.out.println("TiDb 签到任务结束...");
+            System.out.println("[TiDB] 签到任务结束");
         } catch (Exception e) {
             e.printStackTrace();
-            addMessage("TiDb 签到失败！请检查日志!!!");
+            addMessage("TiDB 签到失败，请查看日志");
         }
         return this;
     }

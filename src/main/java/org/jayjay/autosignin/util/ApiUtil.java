@@ -87,7 +87,7 @@ public class ApiUtil {
     }
 
     /**
-     * 墨道db签到
+     * 墨天轮签到
      *
      * @return 列表list JSONArray
      */
@@ -105,10 +105,7 @@ public class ApiUtil {
             return null;
         }
         String body = res.body();
-        res.getCookies().forEach(System.out::println);
-        System.out.println("------------");
-        System.out.println(res.getCookieStr());
-        System.out.println(res.header("Authorization"));
+        System.out.println("[墨天轮] 登录成功");
         JSONObject result = toJSON(body);
         assert result != null;
         result.getStr("operateMessage");
@@ -133,8 +130,7 @@ public class ApiUtil {
         HttpResponse res = HttpRequest.post(url).headerMap(getTidbLoginHeader(), true)
                 .body(bodyJson.toString())
                 .execute();
-        System.out.println("------------");
-        System.out.println(res.body());
+        System.out.println("[TiDB] 登录请求完成，HTTP " + res.getStatus());
         String body1 = HttpRequest.post("https://tidb.net/api/points/daily-checkin")
                 .cookie(res.getCookies())
                 .headerMap(getTidbCheckInHeader(), true).header("x-csrftoken", res.getCookieValue("csrftoken")).execute().body();
@@ -151,11 +147,9 @@ public class ApiUtil {
     public static void checkInYongHong() throws Exception {
         String yhUsername = System.getenv("YH_USERNAME");
         String yhPassword = System.getenv("YH_PASSWORD");
-        System.out.println("yhUsername: " + yhUsername);
-        System.out.println("yhPassword: " + yhPassword);
         //自动下载，第一次下载后不会再下载
         RevisionInfo revisionInfo = Puppeteer.downloadBrowser();
-        System.out.println("revisionInfo: " + revisionInfo);
+        System.out.println("[永洪] Chrome 版本：" + revisionInfo);
         ArrayList<String> argList = new ArrayList<>();
         // withHeadless 是否开启无头模式，无头模式不会显示浏览器
 //        LaunchOptions options = new LaunchOptionsBuilder().withArgs(argList).withHeadless(false).build();
@@ -168,7 +162,7 @@ public class ApiUtil {
                 .product(Product.Chrome).build();
 //        options.setProduct(Product.Chrome);
         try (Browser browser = Puppeteer.launch(options)) {
-            System.out.println(browser.userAgent());
+            System.out.println("[永洪] 浏览器 User-Agent：" + browser.userAgent());
             Page page = browser.newPage();
             page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //            page.goTo("https://club.yonghongtech.com/member.php?mod=logging&action=login");
@@ -180,14 +174,13 @@ public class ApiUtil {
 //            page.click("input[name='loginsubmit']");
             ElementHandle loginBtn = page.$("button[name='loginsubmit']");
 //            System.out.println(loginBtn);
-            System.out.println("点击登录");
+            System.out.println("[永洪] 提交登录");
             loginBtn.click();
             loginBtn.dispose();
             Thread.sleep(3000);
-            System.out.println(page.cookies());
             Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
             if (any.isPresent()) {
-                System.out.println("获取cookie成功:"+any.get().getValue());
+                System.out.println("[永洪] 登录成功，已获取会话 Cookie");
 //                Page card = browser.newPage();
 //                card.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.82");
 //                String url = "https://club.yonghongtech.com/home.php?mod=space&uid=" + any.get().getValue() + "&do=signlog&from=space";
@@ -197,7 +190,7 @@ public class ApiUtil {
                 System.out.println(page.url());
                 Thread.sleep(3000);
             }else {
-                System.out.println("获取cookie失败");
+                System.out.println("[永洪] 登录失败，未获取会话 Cookie");
             }
             Page cj = browser.newPage();
             
@@ -205,12 +198,12 @@ public class ApiUtil {
             cj.goTo("https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3");
             Thread.sleep(5000);
 //            page.waitForNavigation();
-            System.out.println("开始抽奖！");
+            System.out.println("[永洪] 开始抽奖");
             cj.click("#startbtn");
             cj.waitForSelector("#main_messaqge");
 //            Thread.sleep(15000);
-            System.out.println(cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
-            System.out.println("永洪抽奖完成");
+            System.out.println("[永洪] 抽奖结果：" + cj.evaluate("document.querySelector('#main_messaqge div p').innerText"));
+            System.out.println("[永洪] 抽奖完成");
 //            System.out.println(page.content());
             System.out.println(cj.url());
         }
@@ -225,7 +218,7 @@ public class ApiUtil {
             String uid = matcher.group(1);
             return uid;
         } else {
-            System.out.println("未找到匹配的UID");
+            System.out.println("[永洪] 未找到匹配的 UID");
             return null;
         }
     }

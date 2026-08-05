@@ -40,7 +40,7 @@ public class MoDbCheckInTask extends CheckInTask {
 
     @Override
     public MessageList messageList() {
-        return new MessageList("Modb 签到", listMessage);
+        return new MessageList("墨天轮签到", listMessage);
     }
 
     @Test()
@@ -53,15 +53,15 @@ public class MoDbCheckInTask extends CheckInTask {
         try {
 
 
-            System.out.println("Modb 签到任务开始");
+            System.out.println("[墨天轮] 签到任务开始");
             String modbUsername = System.getenv("MODB_USERNAME");
             String modbPassword = System.getenv("MODB_PASSWORD");
             if (StrUtil.isBlank(modbUsername) || StrUtil.isBlank(modbPassword)) {
-                System.out.println("Modb 账号密码未配置，跳过签到");
+                System.out.println("[墨天轮] 用户名或密码未配置，跳过签到");
                 isRun = !isRun;
                 return this;
             }
-            System.out.println("开始登录...");
+            System.out.println("[墨天轮] 开始登录");
             JSONObject bodyJson = JSONUtil.createObj();
             bodyJson.set("phoneNum", modbUsername);
             bodyJson.set("password", modbPassword);
@@ -70,15 +70,13 @@ public class MoDbCheckInTask extends CheckInTask {
                     .execute();
 
             if (!loginRes.isOk()) {
-                System.out.println("Modb 登录失败！");
-                System.out.println(loginRes.body());
-                addMessage("Modb 签到失败！请检查日志!!!");
+                System.err.println("[墨天轮] 登录失败，HTTP " + loginRes.getStatus());
+                addMessage("墨天轮签到失败，请查看日志");
                 return this;
             }
             JSONObject loginBody = toJSON(loginRes.body());
-            System.out.println(loginBody.getStr("operateMessage"));
+            System.out.println("[墨天轮] 登录结果：" + loginBody.getStr("operateMessage"));
             List<HttpCookie> cookies = loginRes.getCookies();
-            loginRes.getCookies().forEach(System.out::println);
             Map<String, String> headers = headers();
             headers.put("Authorization", loginRes.header("Authorization"));
             //查询用户信息
@@ -87,7 +85,6 @@ public class MoDbCheckInTask extends CheckInTask {
                     .headerMap(userHeaders(loginRes.header("Authorization")), true).execute();
             if (userRes.isOk()) {
                 JSONObject userBody = toJSON(userRes.body());
-                System.out.println(userBody);
                 StringBuilder account = lineMsg("用户名：").append(userBody.getStr("account"));
                 addMessage(account);
                 addMessage("墨值：", userBody.getStr("point"));
@@ -99,7 +96,6 @@ public class MoDbCheckInTask extends CheckInTask {
             String reqKey = "";
             if (clockRes.isOk()) {
                 JSONObject body = toJSON(clockRes.body());
-                System.out.println(body);
                 if (body.containsKey("operateCallBackObj")) {
                     String operateCallBackObj = body.getStr("operateCallBackObj");
                     try {
@@ -110,21 +106,20 @@ public class MoDbCheckInTask extends CheckInTask {
                 }
             }
             //签到
-            System.out.println("开始签到...");
+            System.out.println("[墨天轮] 开始签到");
             HttpResponse checkInRes = HttpRequest.post(checkInUrl)
                     .cookie(cookies)
                     .body("{\"reqKey\":\"" + reqKey + "\"}")
                     .headerMap(headers, true).execute();
             String body = checkInRes.body();
             if (!checkInRes.isOk()) {
-                System.out.println(body);
-                System.out.println("Modb 签到失败！");
-                addMessage("Modb 签到失败！请检查日志!!!");
+                System.err.println("[墨天轮] 签到失败，HTTP " + checkInRes.getStatus());
+                addMessage("墨天轮签到失败，请查看日志");
                 return this;
             }
-            System.out.println(body);
             JSONObject checkInBody = toJSON(body);
             String str = checkInBody.getStr("operateMessage");
+            System.out.println("[墨天轮] 签到结果：" + str);
             StringBuilder checkInMsg = lineMsg(str);
 
 //        if(checkInBody.containsKey("operateCallBackObj")){
@@ -134,10 +129,10 @@ public class MoDbCheckInTask extends CheckInTask {
 //            }
 //        }
             addMessage(checkInMsg);
-            System.out.println("Modb 签到任务结束...");
+            System.out.println("[墨天轮] 签到任务结束");
         } catch (Exception e) {
             e.printStackTrace();
-            addMessage("Modb 签到失败！请检查日志!!!");
+            addMessage("墨天轮签到失败，请查看日志");
         }
         return this;
     }

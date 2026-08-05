@@ -28,7 +28,7 @@ public class MessageUtil {
     public void sendMsg(List<MessageList> messageList){
         List<MessageList> sendList = messageList.stream().filter(MessageList::isSend).collect(Collectors.toList());
         if(CollUtil.isEmpty(sendList)){
-            System.out.println("没有需要发送的消息，停止发送");
+            System.out.println("[通知] 没有需要发送的签到结果，跳过通知");
             return;
         }
         sendEmail(sendList);
@@ -40,9 +40,9 @@ public class MessageUtil {
 
 
     public void sendEmail(List<MessageList> messageList){
-        System.out.println("发送邮件");
+        System.out.println("[通知] 开始发送邮件通知");
         if(StrUtil.isBlank(EMAIL_USERNAME) || StrUtil.isBlank(EMAIL_PASSWORD) || StrUtil.isBlank(EMAIL_TO)){
-            System.out.println("发送邮件失败");
+            System.out.println("[通知] 邮件通知未配置，跳过发送");
             return;
         }
 
@@ -64,14 +64,14 @@ public class MessageUtil {
 //        System.out.println(message);
         MailUtil.send(account, CollUtil.toList(EMAIL_TO.split(",")),
                 "签到结果", message.toString(), true);
-        System.out.println("发送邮件成功");
+        System.out.println("[通知] 邮件通知发送成功");
     }
 
 
     public void sendPushPlus(List<MessageList> messageList){
-        System.out.println("发送pushplus");
+        System.out.println("[通知] 开始发送 PushPlus 通知");
         if(StrUtil.isBlank(PUSH_PLUS_TOKEN)){
-            System.out.println("发送pushplus失败");
+            System.out.println("[通知] PushPlus 通知未配置，跳过发送");
             return;
         }
         JSONObject body = new JSONObject();
@@ -83,14 +83,13 @@ public class MessageUtil {
         HttpResponse execute = HttpRequest.post("http://www.pushplus.plus/send")
                 .header("Content-Type","application/json")
                 .body(body.toString()).execute();
-        System.out.println(execute.body());
-        System.out.println("发送pushplus成功");
+        System.out.println("[通知] PushPlus 响应（HTTP " + execute.getStatus() + "）：" + execute.body());
     }
 
     public void sendServerChan(List<MessageList> messageList){
-        System.out.println("发送serverchan");
+        System.out.println("[通知] 开始发送 Server酱通知");
         if(StrUtil.isBlank(SERVER_CHAN_TOKEN)){
-            System.out.println("发送serverchan失败");
+            System.out.println("[通知] Server酱通知未配置，跳过发送");
             return;
         }
         String url = "https://sctapi.ftqq.com/" + SERVER_CHAN_TOKEN + ".send";
@@ -103,8 +102,7 @@ public class MessageUtil {
         HttpResponse execute = HttpRequest.post(url)
                 .header("Content-Type","application/json")
                 .body(body.toString()).execute();
-        System.out.println(execute.body());
-        System.out.println("发送serverchan成功");
+        System.out.println("[通知] Server酱响应（HTTP " + execute.getStatus() + "）：" + execute.body());
     }
 
     public String extractDomain() {

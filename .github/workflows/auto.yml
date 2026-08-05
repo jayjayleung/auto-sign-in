@@ -13,10 +13,6 @@ on:
     - cron: "11 23 * * *" # 北京时间上午07:11
   workflow_dispatch:
 
-concurrency:
-  group: auto-sign-in
-  cancel-in-progress: false
-
 env:
   MODB_USERNAME: ${{ secrets.MODB_USERNAME }}
   MODB_PASSWORD: ${{ secrets.MODB_PASSWORD }}
@@ -24,6 +20,8 @@ env:
   TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
   YH_USERNAME: ${{ secrets.YH_USERNAME }}
   YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
+  YUNQIAO_USERNAME: ${{ secrets.YUNQIAO_USERNAME }}
+  YUNQIAO_PASSWORD: ${{ secrets.YUNQIAO_PASSWORD }}
   YUNQIAO_USERNAME_1: ${{ secrets.YUNQIAO_USERNAME_1 }}
   YUNQIAO_PASSWORD_1: ${{ secrets.YUNQIAO_PASSWORD_1 }}
   YUNQIAO_USERNAME_2: ${{ secrets.YUNQIAO_USERNAME_2 }}

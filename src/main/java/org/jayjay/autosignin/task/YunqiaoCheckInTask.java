@@ -23,7 +23,9 @@ public class YunqiaoCheckInTask extends CheckInTask {
     private static final String DEFAULT_API_BASE_URL = "https://api.quya.org";
     private static final String DEFAULT_POINTS_BASE_URL = "https://www.quya.org";
     private static final String CUSTOM_PAGE_URL = DEFAULT_API_BASE_URL + "/custom/93bbf0afef76f203";
-    // 账号配置按编号成对读取，例如 YUNQIAO_USERNAME_1 和 YUNQIAO_PASSWORD_1。
+    private static final String DEFAULT_USERNAME_KEY = "YUNQIAO_USERNAME";
+    private static final String DEFAULT_PASSWORD_KEY = "YUNQIAO_PASSWORD";
+    // 多账号配置按编号成对读取，例如 YUNQIAO_USERNAME_1 和 YUNQIAO_PASSWORD_1。
     private static final Pattern USERNAME_KEY = Pattern.compile("^YUNQIAO_USERNAME_(\\d+)$");
     private static final Pattern PASSWORD_KEY = Pattern.compile("^YUNQIAO_PASSWORD_(\\d+)$");
     private static final int REQUEST_TIMEOUT = 30000;
@@ -50,19 +52,19 @@ public class YunqiaoCheckInTask extends CheckInTask {
 
     @Override
     public MessageList messageList() {
-        return new MessageList("云桥积分签到", listMessage);
+        return new MessageList("云桥签到", listMessage);
     }
 
     @Override
     public CheckInTask run() {
         List<Account> accounts = loadAccounts(environment);
         if (CollUtil.isEmpty(accounts)) {
-            System.out.println("云桥账号未配置，跳过签到");
+            System.out.println("[云桥] 账号未配置，跳过签到");
             isRun = false;
             return this;
         }
 
-        System.out.println("云桥积分签到任务开始，账号数：" + accounts.size());
+        System.out.println("[云桥] 签到任务开始，账号数：" + accounts.size());
         for (Account account : accounts) {
             if (!account.isComplete()) {
                 addMessage(accountLabel(account), "：用户名或密码配置不完整，已跳过");
@@ -72,11 +74,11 @@ public class YunqiaoCheckInTask extends CheckInTask {
                 checkIn(account);
             } catch (Exception e) {
                 String error = safeMessage(e.getMessage());
-                System.err.println("云桥账号 " + account.index + " 签到失败：" + error);
-                addMessage(accountLabel(account), "：签到失败 - ", error);
+                System.err.println("[云桥] 账号 " + account.index + " 签到失败：" + error);
+                addMessage(accountLabel(account), "：签到失败，原因：", error);
             }
         }
-        System.out.println("云桥积分签到任务结束");
+        System.out.println("[云桥] 签到任务结束");
         return this;
     }
 
@@ -242,9 +244,22 @@ public class YunqiaoCheckInTask extends CheckInTask {
             }
         }
 
+        AccountValues firstAccount = valuesByIndex.get(1);
+        if (firstAccount == null || firstAccount.isBlank()) {
+            AccountValues defaultAccount = new AccountValues();
+            defaultAccount.username = environment.get(DEFAULT_USERNAME_KEY);
+            defaultAccount.password = environment.get(DEFAULT_PASSWORD_KEY);
+            if (!defaultAccount.isBlank()) {
+                valuesByIndex.put(1, defaultAccount);
+            }
+        }
+
         List<Account> accounts = new ArrayList<>();
         for (Map.Entry<Integer, AccountValues> entry : valuesByIndex.entrySet()) {
             AccountValues values = entry.getValue();
+            if (values.isBlank()) {
+                continue;
+            }
             accounts.add(new Account(entry.getKey(), values.username, values.password));
         }
         return accounts;
@@ -313,6 +328,10 @@ public class YunqiaoCheckInTask extends CheckInTask {
     private static class AccountValues {
         private String username;
         private String password;
+
+        private boolean isBlank() {
+            return StrUtil.isBlank(username) && StrUtil.isBlank(password);
+        }
     }
 
     private static class LoginSession {

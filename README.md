@@ -41,6 +41,8 @@
 | TIDB_PASSWORD | tidb密码 | 是 |
 | YH_USERNAME | 永洪社区用户名 | 是 |
 | YH_PASSWORD | 永洪社区密码 | 是 |
+| YUNQIAO_USERNAME | 云桥单账号邮箱 | 否 |
+| YUNQIAO_PASSWORD | 云桥单账号密码 | 否 |
 | YUNQIAO_USERNAME_1 | 云桥账号 1 邮箱 | 否 |
 | YUNQIAO_PASSWORD_1 | 云桥账号 1 密码 | 否 |
 | YUNQIAO_USERNAME_2 | 云桥账号 2 邮箱 | 否 |
@@ -50,6 +52,17 @@
 | EMAIL_TO | 订阅人邮箱地址(收件人)，如需多人订阅使用 `,` 分割，例如: `a@163.com,b@qq.com` | 否 |
 | PUSH_PLUS_TOKEN | [Pushplus](http://www.pushplus.plus/) 官网申请，支持微信消息推送 | 否 |
 | SERVER_CHAN_TOKEN | [Server酱](https://sct.ftqq.com//) 官网申请，支持微信消息推送 | 否 |
+
+云桥配置两个账号时，第一个账号可以不加 `_1`，第二个账号直接使用 `_2`：
+
+```text
+YUNQIAO_USERNAME=第一个账号邮箱
+YUNQIAO_PASSWORD=第一个账号密码
+YUNQIAO_USERNAME_2=第二个账号邮箱
+YUNQIAO_PASSWORD_2=第二个账号密码
+```
+
+也可以使用 `_1`、`_2` 的完整编号方式。无序号配置与 `_1` 同时存在时，账号 1 使用 `_1` 配置。
 
 3. 仓库 -> Actions，检查 Workflows 并启用。
 
@@ -82,6 +95,8 @@ cp .env.example .env
 | TIDB_PASSWORD | TiDB 社区密码 | 否 |
 | YH_USERNAME | 永洪社区用户名 | 否 |
 | YH_PASSWORD | 永洪社区密码 | 否 |
+| YUNQIAO_USERNAME | 云桥单账号邮箱 | 否 |
+| YUNQIAO_PASSWORD | 云桥单账号密码 | 否 |
 | YUNQIAO_USERNAME_1 | 云桥账号 1 邮箱 | 否 |
 | YUNQIAO_PASSWORD_1 | 云桥账号 1 密码 | 否 |
 | YUNQIAO_USERNAME_2 | 云桥账号 2 邮箱 | 否 |
@@ -95,8 +110,19 @@ cp .env.example .env
 说明:
 
 - 不需要某个站点时，留空对应账号密码即可。
-- 云桥支持多账号，按 `YUNQIAO_USERNAME_1` / `YUNQIAO_PASSWORD_1` 编号配置；更多账号继续使用 `_3`、`_4`。
+- 云桥只有一个账号时可直接使用 `YUNQIAO_USERNAME` / `YUNQIAO_PASSWORD`，无需添加 `_1`。
+- 云桥有多个账号时，第一个账号仍可使用无序号变量，第二个账号直接使用 `YUNQIAO_USERNAME_2` / `YUNQIAO_PASSWORD_2`，后续账号继续使用 `_3`、`_4`。
+- 也可以从 `_1` 开始完整编号；无序号和 `_1` 同时配置时，以 `_1` 为准。
 - 通知方式可选，邮箱/PushPlus/Server酱可按需配置其一或多个。
+
+两个云桥账号的 `.env` 示例：
+
+```env
+YUNQIAO_USERNAME=first@example.com
+YUNQIAO_PASSWORD=first-password
+YUNQIAO_USERNAME_2=second@example.com
+YUNQIAO_PASSWORD_2=second-password
+```
 
 #### 3) 启动服务
 

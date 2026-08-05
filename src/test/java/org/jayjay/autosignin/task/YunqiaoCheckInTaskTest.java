@@ -68,7 +68,7 @@ public class YunqiaoCheckInTaskTest {
         YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
         task.run();
 
-        assertEquals("云桥积分签到", task.messageList().getTitle());
+        assertEquals("云桥签到", task.messageList().getTitle());
         List<StringBuilder> messages = task.getListMessage();
         assertEquals(3, messages.size());
         assertEquals("账号 1（one@example.com）：今日已签到，当前积分 3，连续签到 1 天", messages.get(0).toString());
@@ -97,7 +97,7 @@ public class YunqiaoCheckInTaskTest {
         List<StringBuilder> messages = task.getListMessage();
         assertEquals(2, messages.size());
         assertTrue(messages.get(0).toString().contains("账号 1（one@example.com）：今日已签到"));
-        assertTrue(messages.get(1).toString().contains("账号 2（two@example.com）：签到失败 - 建立积分会话失败，未获取会话 Cookie"));
+        assertTrue(messages.get(1).toString().contains("账号 2（two@example.com）：签到失败，原因：建立积分会话失败，未获取会话 Cookie"));
         assertTrue(secondSessionRequestCookie.get() == null || secondSessionRequestCookie.get().trim().isEmpty());
         assertEquals(0, checkInRequests.get());
         assertFalse(messages.toString().contains("password-one"));
@@ -119,6 +119,108 @@ public class YunqiaoCheckInTaskTest {
         assertEquals(10, accounts.get(1).index);
         assertTrue(accounts.get(0).isComplete());
         assertTrue(accounts.get(1).isComplete());
+    }
+
+    @Test
+    public void loadsUnnumberedAccountAsFirstAccount() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME", "single@example.com");
+        environment.put("YUNQIAO_PASSWORD", "single-password");
+
+        List<YunqiaoCheckInTask.Account> accounts = YunqiaoCheckInTask.loadAccounts(environment);
+
+        assertEquals(1, accounts.size());
+        assertEquals(1, accounts.get(0).index);
+        assertEquals("single@example.com", accounts.get(0).username);
+        assertEquals("single-password", accounts.get(0).password);
+    }
+
+    @Test
+    public void numberedFirstAccountOverridesUnnumberedAccount() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME", "single@example.com");
+        environment.put("YUNQIAO_PASSWORD", "single-password");
+        environment.put("YUNQIAO_USERNAME_1", "numbered@example.com");
+        environment.put("YUNQIAO_PASSWORD_1", "numbered-password");
+
+        List<YunqiaoCheckInTask.Account> accounts = YunqiaoCheckInTask.loadAccounts(environment);
+
+        assertEquals(1, accounts.size());
+        assertEquals("numbered@example.com", accounts.get(0).username);
+        assertEquals("numbered-password", accounts.get(0).password);
+    }
+
+    @Test
+    public void partialNumberedFirstAccountDoesNotMixWithUnnumberedAccount() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME", "single@example.com");
+        environment.put("YUNQIAO_PASSWORD", "single-password");
+        environment.put("YUNQIAO_USERNAME_1", "numbered@example.com");
+        environment.put("YUNQIAO_PASSWORD_1", "");
+
+        List<YunqiaoCheckInTask.Account> accounts = YunqiaoCheckInTask.loadAccounts(environment);
+
+        assertEquals(1, accounts.size());
+        assertEquals("numbered@example.com", accounts.get(0).username);
+        assertEquals("", accounts.get(0).password);
+        assertFalse(accounts.get(0).isComplete());
+    }
+
+    @Test
+    public void blankNumberedFirstAccountFallsBackToUnnumberedAccount() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME", "single@example.com");
+        environment.put("YUNQIAO_PASSWORD", "single-password");
+        environment.put("YUNQIAO_USERNAME_1", "   ");
+        environment.put("YUNQIAO_PASSWORD_1", "\t");
+
+        List<YunqiaoCheckInTask.Account> accounts = YunqiaoCheckInTask.loadAccounts(environment);
+
+        assertEquals(1, accounts.size());
+        assertEquals("single@example.com", accounts.get(0).username);
+        assertEquals("single-password", accounts.get(0).password);
+    }
+
+    @Test
+    public void skipsUnnumberedAccountWhenVariablesHaveNoValues() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME", " ");
+        environment.put("YUNQIAO_PASSWORD", "\t");
+
+        List<YunqiaoCheckInTask.Account> accounts = YunqiaoCheckInTask.loadAccounts(environment);
+
+        assertTrue(accounts.isEmpty());
+    }
+
+    @Test
+    public void skipsTaskWhenAccountVariablesHaveNoValues() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME_1", "");
+        environment.put("YUNQIAO_PASSWORD_1", "");
+        environment.put("YUNQIAO_USERNAME_2", "   ");
+        environment.put("YUNQIAO_PASSWORD_2", "\t");
+
+        YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
+        task.run();
+
+        assertFalse(task.isRun());
+        assertTrue(task.getListMessage().isEmpty());
+        assertEquals(0, checkInRequests.get());
+    }
+
+    @Test
+    public void keepsPartiallyConfiguredAccountForValidationMessage() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("YUNQIAO_USERNAME_1", "incomplete@example.com");
+        environment.put("YUNQIAO_PASSWORD_1", "");
+
+        YunqiaoCheckInTask task = new YunqiaoCheckInTask(environment, baseUrl, baseUrl);
+        task.run();
+
+        assertTrue(task.isRun());
+        assertEquals(1, task.getListMessage().size());
+        assertTrue(task.getListMessage().get(0).toString().contains("用户名或密码配置不完整，已跳过"));
+        assertEquals(0, checkInRequests.get());
     }
 
     private void handleLogin(HttpExchange exchange) throws IOException {
