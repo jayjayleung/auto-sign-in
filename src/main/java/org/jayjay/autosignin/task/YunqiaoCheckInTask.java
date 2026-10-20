@@ -21,9 +21,9 @@ import java.util.regex.Pattern;
 
 public class YunqiaoCheckInTask extends CheckInTask {
 
-    // 通过 quya.org 域名提供登录和积分接口。
-    private static final String DEFAULT_API_BASE_URL = "https://api.quya.org";
-    private static final String DEFAULT_POINTS_BASE_URL = "https://www.quya.org";
+    // 通过 yunqiao.me 域名提供登录和积分接口。
+    private static final String DEFAULT_API_BASE_URL = "https://api.yunqiao.me";
+    private static final String DEFAULT_POINTS_BASE_URL = "https://www.yunqiao.me";
     private static final String CUSTOM_PAGE_URL = DEFAULT_API_BASE_URL + "/custom/93bbf0afef76f203";
     private static final String DEFAULT_USERNAME_KEY = "YUNQIAO_USERNAME";
     private static final String DEFAULT_PASSWORD_KEY = "YUNQIAO_PASSWORD";

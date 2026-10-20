@@ -11,7 +11,7 @@
 - **[墨天轮(墨道db)](https://tidb.net/)** 签到
 - **[tidb](https://www.modb.pro/)** 签到
 - **[永洪社区](https://club.yonghongtech.com/)** 签到+抽抽乐
-- **[云桥积分中心](https://api.quya.org/custom/93bbf0afef76f203)** 多账号签到
+- **[云桥积分中心](https://api.yunqiao.me/custom/93bbf0afef76f203)** 多账号签到
 
 
 ## 如何使用?
