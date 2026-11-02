@@ -37,8 +37,10 @@
 |---|---|---|
 | MODB_USERNAME | 墨天轮用户名 | 是 |
 | MODB_PASSWORD | 墨天轮密码 | 是 |
-| TIDB_USERNAME | tidb用户名 | 是 |
-| TIDB_PASSWORD | tidb密码 | 是 |
+| TIDB_LOGIN_MODE | `password`（默认）或 `cookie` | 否 |
+| TIDB_USERNAME | 账号密码模式的 tidb 用户名 | 否 |
+| TIDB_PASSWORD | 账号密码模式的 tidb 密码 | 否 |
+| TIDB_COOKIE | Cookie 模式的浏览器 Cookie，需包含 `csrftoken` 和 `ssid` | 否 |
 | YH_USERNAME | 永洪社区用户名 | 是 |
 | YH_PASSWORD | 永洪社区密码 | 是 |
 | YUNQIAO_USERNAME | 云桥单账号邮箱 | 否 |
@@ -91,8 +93,10 @@ cp .env.example .env
 |---|---|---|
 | MODB_USERNAME | 墨天轮用户名 | 否 |
 | MODB_PASSWORD | 墨天轮密码 | 否 |
-| TIDB_USERNAME | TiDB 社区用户名 | 否 |
-| TIDB_PASSWORD | TiDB 社区密码 | 否 |
+| TIDB_LOGIN_MODE | `password`（默认）或 `cookie` | 否 |
+| TIDB_USERNAME | 账号密码模式的 TiDB 社区用户名 | 否 |
+| TIDB_PASSWORD | 账号密码模式的 TiDB 社区密码 | 否 |
+| TIDB_COOKIE | Cookie 模式的浏览器 Cookie，需包含 `csrftoken` 和 `ssid` | 否 |
 | YH_USERNAME | 永洪社区用户名 | 否 |
 | YH_PASSWORD | 永洪社区密码 | 否 |
 | YUNQIAO_USERNAME | 云桥单账号邮箱 | 否 |
@@ -110,6 +114,7 @@ cp .env.example .env
 说明:
 
 - 不需要某个站点时，留空对应账号密码即可。
+- TiDB 默认使用账号密码。`TIDB_LOGIN_MODE=cookie` 时改为使用 `TIDB_COOKIE`。两种模式只读取自己需要的配置。
 - 云桥只有一个账号时可直接使用 `YUNQIAO_USERNAME` / `YUNQIAO_PASSWORD`，无需添加 `_1`。
 - 云桥有多个账号时，第一个账号仍可使用无序号变量，第二个账号直接使用 `YUNQIAO_USERNAME_2` / `YUNQIAO_PASSWORD_2`，后续账号继续使用 `_3`、`_4`。
 - 也可以从 `_1` 开始完整编号；无序号和 `_1` 同时配置时，以 `_1` 为准。

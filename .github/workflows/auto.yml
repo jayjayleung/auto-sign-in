@@ -16,8 +16,10 @@ on:
 env:
   MODB_USERNAME: ${{ secrets.MODB_USERNAME }}
   MODB_PASSWORD: ${{ secrets.MODB_PASSWORD }}
+  TIDB_LOGIN_MODE: ${{ secrets.TIDB_LOGIN_MODE }}
   TIDB_USERNAME: ${{ secrets.TIDB_USERNAME }}
   TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
+  TIDB_COOKIE: ${{ secrets.TIDB_COOKIE }}
   YH_USERNAME: ${{ secrets.YH_USERNAME }}
   YH_PASSWORD: ${{ secrets.YH_PASSWORD }}
   YUNQIAO_USERNAME: ${{ secrets.YUNQIAO_USERNAME }}

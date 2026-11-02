@@ -1,6 +1,17 @@
 #!/bin/bash
 set -e
 
+# Compose 会把 env 文件里的 $ 当成变量替换。挂载的原始文件按字面值覆盖，保留 Cookie 中的 $。
+if [ -f /app/config.env ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+    line="${line#export }"
+    export "$line"
+  done < /app/config.env
+fi
+
 # === 1. 将当前所有环境变量导出到文件，供 cron 任务加载 ===
 # cron 执行时不会继承容器的环境变量，所以需要先持久化到文件
 ENV_FILE=/app/env.sh
