@@ -253,6 +253,20 @@ public class YongHoneCheckInTask extends CheckInTask {
         return html != null && (html.contains("nex_forum_lists") || html.contains("nex_Mythreads_Tuiys"));
     }
 
+    /**
+     * 永洪论坛每天 23:50 到次日 6:00 关闭发帖，发帖页只会返回提示信息页。
+     */
+    static boolean blockedByQuietHours(String html) {
+        return html != null
+                && html.contains("不能进行此操作")
+                && !html.contains("nex_forum_lists");
+    }
+
+    private void reportQuietHours(String title) {
+        System.out.println("[永洪] " + title + "帖处于论坛禁发时段，跳过");
+        addMessage(title, "帖未发布：论坛每日 23:50-6:00 禁发，请其他时间再试");
+    }
+
     static Set<String> postedTitlesOn(String html, LocalDate day) {
         Set<String> titles = new LinkedHashSet<>();
         if (StrUtil.isBlank(html) || day == null) {
@@ -309,6 +323,10 @@ public class YongHoneCheckInTask extends CheckInTask {
             page.goTo(publishUrl);
             Thread.sleep(5000);
             System.out.println(page.url());
+            if (blockedByQuietHours(page.content())) {
+                reportQuietHours(title);
+                return;
+            }
             page.evaluate("document.querySelectorAll('#typeid_ctrl_menu li')[1].click()");
 
             page.type("#subject", title);
@@ -360,6 +378,10 @@ public class YongHoneCheckInTask extends CheckInTask {
             page.goTo(publishUrl);
             Thread.sleep(5000);
             System.out.println(page.url());
+            if (blockedByQuietHours(page.content())) {
+                reportQuietHours("签到");
+                return;
+            }
             page.evaluate("document.querySelectorAll('#typeid_ctrl_menu li')[1].click()");
 
             page.type("#subject", "签到");

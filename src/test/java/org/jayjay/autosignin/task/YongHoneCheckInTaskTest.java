@@ -46,4 +46,24 @@ public class YongHoneCheckInTaskTest {
         assertFalse(YongHoneCheckInTask.threadListReady("<title>提示信息</title>"));
         assertEquals(Collections.emptySet(), YongHoneCheckInTask.postedTitlesOn("", TODAY));
     }
+
+    @Test
+    public void detectsQuietHoursNoticePage() {
+        String blocked = "<div id=\"messagetext\" class=\"alert_error\">"
+                + "<p>抱歉，管理员设置了每日 23:50-6:00 不能进行此操作或访问此页面，请其他时间再试</p></div>";
+
+        assertTrue(YongHoneCheckInTask.blockedByQuietHours(blocked));
+        assertFalse(YongHoneCheckInTask.blockedByQuietHours("<form id=\"postform\">正常发帖页</form>"));
+        assertFalse(YongHoneCheckInTask.blockedByQuietHours(null));
+    }
+
+    @Test
+    public void ignoresQuietHoursTextInsideNormalThreadList() {
+        String html = ""
+                + "<div class=\"nex_forum_lists\"><a class=\"s xst\">签到</a>"
+                + "<dd class=\"nex_forumn_post_dateline\">2026-11-3</dd></div>"
+                + "<div>不能进行此操作的说明文字</div>";
+
+        assertFalse(YongHoneCheckInTask.blockedByQuietHours(html));
+    }
 }
