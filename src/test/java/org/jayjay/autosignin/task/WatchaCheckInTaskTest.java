@@ -15,6 +15,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -48,6 +49,9 @@ public class WatchaCheckInTaskTest {
     private volatile boolean thinProducts;
     private volatile int weeklyPostCount;
     private volatile String aiMode = "ok";
+    private volatile boolean postedToday;
+    private volatile boolean postedYesterday;
+    private volatile boolean userPostsFail;
     private int[] productIds = new int[]{7, 8};
     private final AtomicInteger pauses = new AtomicInteger();
     private final AtomicInteger aiRequests = new AtomicInteger();
@@ -81,6 +85,9 @@ public class WatchaCheckInTaskTest {
         thinProducts = false;
         weeklyPostCount = 0;
         aiMode = "ok";
+        postedToday = false;
+        postedYesterday = false;
+        userPostsFail = false;
         productIds = new int[]{7, 8};
         pauses.set(0);
         aiRequests.set(0);
@@ -232,6 +239,49 @@ public class WatchaCheckInTaskTest {
                 + "领取奖励：发布 1 篇猹评\n"
                 + "领取奖励：发布 1 篇帖子\n"
                 + "瓜子：136", task.getMessageBlocks().get(1).toString());
+    }
+
+    @Test
+    public void skipsPostWhenTodayAlreadyPosted() {
+        postedToday = true;
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals(0, discussRequests.get());
+        String quest = task.getMessageBlocks().get(1).toString();
+        assertTrue(quest.contains("本周帖子：今日已发过"));
+    }
+
+    @Test
+    public void postsAgainWhenLatestPostWasYesterday() {
+        postedYesterday = true;
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals(1, discussRequests.get());
+    }
+
+    @Test
+    public void skipsPostWhenPostListIsUnavailable() {
+        userPostsFail = true;
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals(0, discussRequests.get());
+        assertTrue(task.getMessageBlocks().get(1).toString().contains("本周帖子：今日已发过"));
+    }
+
+    @Test
+    public void comparesPostDateInShanghaiTime() {
+        LocalDate day = LocalDate.of(2026, 11, 4);
+
+        assertTrue(WatchaCheckInTask.sameDayShanghai("2026-11-03T16:49:30.813Z", day));
+        assertFalse(WatchaCheckInTask.sameDayShanghai("2026-11-03T15:12:36.997Z", day));
+        assertFalse(WatchaCheckInTask.sameDayShanghai(null, day));
+        assertTrue(WatchaCheckInTask.sameDayShanghai("2026-11-04 08:00:00", day));
     }
 
     @Test
@@ -408,6 +458,7 @@ public class WatchaCheckInTaskTest {
         server.createContext("/api/v2/products/", this::handleProduct);
         server.createContext("/api/v2/discuss/posts", this::handleDiscuss);
         server.createContext("/v1/chat/completions", this::handleAi);
+        server.createContext("/api/v2/users/10174946/posts", this::handleUserPosts);
     }
 
     private Map<String, String> account() {
@@ -429,7 +480,42 @@ public class WatchaCheckInTaskTest {
     private void handleUser(HttpExchange exchange) throws IOException {
         readBody(exchange);
         authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
-        json(exchange, 200, "{\"statusCode\":200,\"data\":{\"nickname\":\"观猹用户\",\"username\":\"watcha-user\"}}");
+        json(exchange, 200, "{\"statusCode\":200,\"data\":{\"id\":10174946,\"nickname\":\"观猹用户\",\"username\":\"watcha-user\"}}");
+    }
+
+    private void handleUserPosts(HttpExchange exchange) throws IOException {
+        readBody(exchange);
+        if (userPostsFail) {
+            json(exchange, 500, "{\"statusCode\":500,\"message\":\"busy\"}");
+            return;
+        }
+        JSONArray items = new JSONArray();
+        if (postedToday) {
+            items.add(JSONUtil.createObj()
+                    .set("id", 31)
+                    .set("title", "今天的帖子")
+                    .set("create_at", todayIso()));
+        }
+        if (postedYesterday) {
+            items.add(JSONUtil.createObj()
+                    .set("id", 30)
+                    .set("title", "昨天的帖子")
+                    .set("create_at", yesterdayIso()));
+        }
+        json(exchange, 200, JSONUtil.createObj()
+                .set("statusCode", 200)
+                .set("data", JSONUtil.createObj().set("count", items.size()).set("items", items))
+                .toString());
+    }
+
+    private static String todayIso() {
+        return java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .toInstant().toString();
+    }
+
+    private static String yesterdayIso() {
+        return java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+                .minusDays(1).toInstant().toString();
     }
 
     private void handleToday(HttpExchange exchange) throws IOException {

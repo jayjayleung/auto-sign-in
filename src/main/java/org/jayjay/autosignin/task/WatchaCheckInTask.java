@@ -11,6 +11,10 @@ import org.jayjay.autosignin.entity.NotificationSection;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,6 +42,7 @@ public class WatchaCheckInTask extends CheckInTask {
             "milestone.user_subscribe", "milestone.like", "milestone.emoji_master"
     };
     private static final int WEEKLY_TIERS = 3;
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
     private static final int REQUEST_TIMEOUT = 30000;
 
     private final Map<String, String> environment;
@@ -438,6 +443,11 @@ public class WatchaCheckInTask extends CheckInTask {
             run.block.addLine("本周帖子：", WEEKLY_TIERS + "/" + WEEKLY_TIERS);
             return;
         }
+        if (postedToday(token)) {
+            run.block.addLine("本周帖子：今日已发过");
+            run.block.addLine("本周帖子：", count + "/" + WEEKLY_TIERS);
+            return;
+        }
         JSONObject daily = items.getJSONObject("daily.product_review");
         List<LoadedProduct> products = daily == null
                 ? new ArrayList<LoadedProduct>() : loadProducts(token, daily, run);
@@ -468,6 +478,57 @@ public class WatchaCheckInTask extends CheckInTask {
         run.published = true;
         run.block.addLine("本周帖子：已发布 ", sanitize(draft.title));
         System.out.println("[观猹] 已发布帖子：" + sanitize(draft.title));
+    }
+
+    /**
+     * 读取本人已发布的帖子，判断今天（上海时区）是否已经发过。读不到时返回 true，宁可少发也不重复。
+     */
+    private boolean postedToday(String token) {
+        try {
+            String userId = loadUserId(token);
+            if (StrUtil.isBlank(userId)) {
+                System.out.println("[观猹] 未取到用户 ID，跳过当日重复检查");
+                return false;
+            }
+            JSONObject data = requestData(authorized(HttpRequest.get(
+                    baseUrl + "/api/v2/users/" + encode(userId) + "/posts?limit=20"), token)
+                    .execute(), "读取我的帖子");
+            JSONArray posts = data.getJSONArray("items");
+            if (posts == null) {
+                return false;
+            }
+            LocalDate today = LocalDate.now(SHANGHAI);
+            for (int index = 0; index < posts.size(); index++) {
+                JSONObject post = posts.getJSONObject(index);
+                String createdAt = post == null ? null : post.getStr("create_at");
+                if (createdAt != null && sameDayShanghai(createdAt, today)) {
+                    System.out.println("[观猹] 今日已发过帖子：" + sanitize(StrUtil.nullToEmpty(post.getStr("title"))));
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException e) {
+            System.out.println("[观猹] 无法确认今日是否已发帖：" + safeMessage(e.getMessage()));
+            return true;
+        }
+    }
+
+    private String loadUserId(String token) {
+        JSONObject me = requestData(authorized(HttpRequest.get(baseUrl + "/api/v2/users/me"), token)
+                .execute(), "读取用户信息");
+        long id = longValue(me, "id");
+        return id > 0 ? String.valueOf(id) : null;
+    }
+
+    static boolean sameDayShanghai(String createdAt, LocalDate day) {
+        if (StrUtil.isBlank(createdAt) || day == null) {
+            return false;
+        }
+        try {
+            return Instant.parse(createdAt.trim()).atZone(SHANGHAI).toLocalDate().equals(day);
+        } catch (DateTimeParseException e) {
+            return createdAt.trim().startsWith(day.toString());
+        }
     }
 
     private List<LoadedProduct> loadProducts(String token, JSONObject quest, QuestRun run) {
