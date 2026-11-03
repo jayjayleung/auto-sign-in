@@ -73,6 +73,15 @@ public class WatchaAiCopywriterTest {
     }
 
     @Test
+    public void mapsVoteToValue() {
+        assertEquals(1, WatchaAiCopywriter.voteValue("GOOD"));
+        assertEquals(2, WatchaAiCopywriter.voteValue("bad"));
+        assertEquals(2, WatchaAiCopywriter.voteValue(" BAD "));
+        assertEquals(1, WatchaAiCopywriter.voteValue(null));
+        assertEquals(1, WatchaAiCopywriter.voteValue("随便"));
+    }
+
+    @Test
     public void rejectsWideTitle() {
         StringBuilder title = new StringBuilder();
         for (int index = 0; index < 40; index++) {

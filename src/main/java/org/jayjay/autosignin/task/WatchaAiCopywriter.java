@@ -38,14 +38,14 @@ class WatchaAiCopywriter {
             "我用下来", "体验下来", "赋能", "闭环", "一站式", "数据提升"
     };
     private static final String[] REVIEW_SHAPES = {
-            "第一段把功能拆成具体的几件事，第二段写一个介绍没写清、使用前要核实的问题。",
-            "第一段写它要解决的现状，第二段写你会把它当成什么，不会把它当成什么。",
-            "第一段写适用人群和主要用处，第二段写要拿哪个例子来核对。"
+            "第一段像跟同事安利或者劝退：用自己的话说它替人省了哪一步，或者卡在哪；第二段顺口带一个你自己还没弄明白的地方。",
+            "第一段像自言自语：它能接走哪件事；第二段说你担心它接不了哪件事。",
+            "第一段从身边哪种人会关心它说起；第二段说你打算拿什么例子去试它，或者为什么懒得试。"
     };
     private static final String[] POST_ANGLES = {
-            "只问一个介绍里没写清的问题",
-            "只写它适合谁",
-            "只写使用前要先核对的一个口径"
+            "只抛一个介绍里没讲清的问题，像在评论区问人",
+            "只聊聊它适合谁，说说你想到的某一种人",
+            "只提一个用之前想先弄明白的口径"
     };
 
     private final AiClient client;
@@ -72,8 +72,11 @@ class WatchaAiCopywriter {
         String user = "体裁：猹评\n"
                 + productBrief(name, slogan, categories, text, anchors)
                 + "写法：" + REVIEW_SHAPES[shape] + "\n"
-                + "返回 {\"paragraphs\":[\"第一段\",\"第二段\"]}\n"
-                + "两段合计 120 到 220 个字。两段里要原样出现至少一个可引用材料。";
+                + "返回 {\"paragraphs\":[\"第一段\",\"第二段\"],\"vote\":\"GOOD 或 BAD\"}\n"
+                + "两段合计 120 到 220 个字，读起来像随口说的。里面至少一处要照抄「可引用材料」里的一个短词，"
+                + "比如产品名、面向人群或某个功能名，但不要整句搬介绍原话。\n"
+                + "vote 是你自己看完介绍的真实态度：觉得想找机会试试就 GOOD，觉得不打算用或没被说服就 BAD。"
+                + "vote 要和正文的语气一致，正文说想试就别投 BAD。";
         return generate(user, true, text, anchors);
     }
 
@@ -89,14 +92,16 @@ class WatchaAiCopywriter {
                 + "角度：" + POST_ANGLES[angle] + "\n"
                 + "返回 {\"title\":\"标题\",\"paragraphs\":[\"正文\"]}\n"
                 + "标题不超过 20 个汉字。正文 60 到 160 个字，写成三到五句，不要写成测评正文。\n"
-                + "正文里要原样出现至少一个可引用材料。";
+                + "正文里至少一处照抄「可引用材料」里的原词，比如直接把产品名、面向人群或某个功能名写进去。";
         return generate(user, false, text, anchors);
     }
 
     private DraftResult generate(String user, boolean review, String source, List<String> anchors) {
-        String system = "你在为观猹写一条第一印象。只根据给出的产品介绍，不编造使用时长、个人经历、测试数据和他人评价。\n"
+        String system = "你是观猹社区里的一个普通用户，正在用第一人称跟人聊天，不是在做测评、写文案或汇报。\n"
+                + "语气像平时发帖：说话短、有转折、可以有点犹豫和小情绪，用「我」「你」这种口吻，避免排比句、分点、总结句和广告腔。\n"
+                + "只根据给出的产品介绍写，不编造使用时长、个人经历、测试数据和他人评价。\n"
                 + "不要使用这些说法：亲测、实测、用过、用了一段时间、用了几个月、用了三个月、我用下来、体验下来、赋能、闭环、一站式、数据提升。\n"
-                + "可以写打算去核实什么，不要写成已经用过。\n"
+                + "可以写自己看到它时在想什么、打算去核实什么，不要说成已经上手。\n"
                 + "只返回 JSON，不要使用 Markdown。";
         String feedback = null;
         String lastFailure = "返回内容无法读取";
@@ -125,15 +130,16 @@ class WatchaAiCopywriter {
         if (json == null) {
             return DraftResult.failed("返回内容无法读取");
         }
-        List<String> paragraphs = textList(json.getJSONArray("paragraphs"));
-        if (paragraphs.size() == 1) {
-            paragraphs = splitLines(paragraphs.get(0));
-        }
+        List<String> paragraphs = paragraphs(json);
         String failure = rejectReview(paragraphs, source, anchors);
         if (failure != null) {
             return DraftResult.failed(failure);
         }
-        return DraftResult.review(paragraphs);
+        return DraftResult.review(paragraphs, voteValue(json.getStr("vote")));
+    }
+
+    static int voteValue(String vote) {
+        return "BAD".equalsIgnoreCase(StrUtil.trimToEmpty(vote)) ? 2 : 1;
     }
 
     private static DraftResult interpretPost(String content, String source, List<String> anchors) {
@@ -141,7 +147,7 @@ class WatchaAiCopywriter {
         if (json == null) {
             return DraftResult.failed("返回内容无法读取");
         }
-        List<String> paragraphs = textList(json.getJSONArray("paragraphs"));
+        List<String> paragraphs = paragraphs(json);
         String failure = rejectPost(json.getStr("title"), paragraphs, source, anchors);
         if (failure != null) {
             return DraftResult.failed(failure);
@@ -270,7 +276,15 @@ class WatchaAiCopywriter {
             return null;
         }
         String json = trimmed.substring(start, end + 1);
-        return JSONUtil.isTypeJSON(json) ? JSONUtil.parseObj(json) : null;
+        return parseObject(json);
+    }
+
+    private static JSONObject parseObject(String json) {
+        try {
+            return JSONUtil.parseObj(json);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static String productBrief(String name, String slogan, String categories, String description,
@@ -362,6 +376,21 @@ class WatchaAiCopywriter {
         }
     }
 
+    private static List<String> paragraphs(JSONObject json) {
+        Object value = json.get("paragraphs");
+        if (value instanceof JSONArray) {
+            List<String> lines = textList((JSONArray) value);
+            if (lines.size() == 1) {
+                return splitLines(lines.get(0));
+            }
+            return lines;
+        }
+        if (value != null) {
+            return splitLines(String.valueOf(value));
+        }
+        return new ArrayList<String>();
+    }
+
     private static List<String> textList(JSONArray array) {
         List<String> lines = new ArrayList<String>();
         if (array == null) {
@@ -392,8 +421,9 @@ class WatchaAiCopywriter {
     }
 
     private static String banned(String text) {
+        String checked = text.replace("没用过", "").replace("没有用过", "").replace("还没用过", "");
         for (String phrase : BANNED) {
-            if (text.contains(phrase)) {
+            if (checked.contains(phrase)) {
                 return "出现了不适合的说法";
             }
         }
@@ -469,11 +499,13 @@ class WatchaAiCopywriter {
     static final class DraftResult {
         final String title;
         final List<String> paragraphs;
+        final int voteValue;
         final String failure;
 
-        private DraftResult(String title, List<String> paragraphs, String failure) {
+        private DraftResult(String title, List<String> paragraphs, int voteValue, String failure) {
             this.title = title;
             this.paragraphs = paragraphs;
+            this.voteValue = voteValue;
             this.failure = failure;
         }
 
@@ -481,16 +513,16 @@ class WatchaAiCopywriter {
             return failure == null;
         }
 
-        static DraftResult review(List<String> paragraphs) {
-            return new DraftResult(null, paragraphs, null);
+        static DraftResult review(List<String> paragraphs, int voteValue) {
+            return new DraftResult(null, paragraphs, voteValue, null);
         }
 
         static DraftResult post(String title, List<String> paragraphs) {
-            return new DraftResult(title, paragraphs, null);
+            return new DraftResult(title, paragraphs, 1, null);
         }
 
         static DraftResult failed(String failure) {
-            return new DraftResult(null, null, failure);
+            return new DraftResult(null, null, 1, failure);
         }
     }
 }

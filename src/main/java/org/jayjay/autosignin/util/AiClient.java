@@ -15,7 +15,7 @@ import java.util.Map;
  */
 public class AiClient {
 
-    private static final int TIMEOUT = 60000;
+    private static final int TIMEOUT = 90000;
 
     private final String baseUrl;
     private final String apiKey;
@@ -44,7 +44,7 @@ public class AiClient {
         JSONObject payload = JSONUtil.createObj()
                 .set("model", model)
                 .set("temperature", 0.8)
-                .set("max_tokens", 800)
+                .set("max_tokens", 3000)
                 .set("messages", messages);
         HttpResponse response = HttpRequest.post(chatEndpoint(baseUrl))
                 .header("Authorization", "Bearer " + apiKey)
@@ -66,9 +66,13 @@ public class AiClient {
         if (choices == null || choices.isEmpty()) {
             throw new IllegalStateException("文案生成失败：服务没有返回文案");
         }
-        JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+        JSONObject choice = choices.getJSONObject(0);
+        JSONObject message = choice.getJSONObject("message");
         if (message == null || StrUtil.isBlank(message.getStr("content"))) {
-            throw new IllegalStateException("文案生成失败：服务没有返回文案");
+            String finish = choice.getStr("finish_reason");
+            throw new IllegalStateException("length".equals(finish)
+                    ? "文案生成失败：输出被长度限制截断"
+                    : "文案生成失败：服务没有返回文案");
         }
         return message.getStr("content");
     }

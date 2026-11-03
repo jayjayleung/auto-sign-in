@@ -343,7 +343,7 @@ public class WatchaCheckInTask extends CheckInTask {
         }
         JSONObject body = JSONUtil.createObj()
                 .set("content", document(draft.paragraphs))
-                .set("vote_value", 1)
+                .set("vote_value", draft.voteValue)
                 .set("images", "")
                 .set("append", false);
         requestData(authorized(HttpRequest.post(baseUrl + "/api/v2/products/" + target.id + "/reviews"), token)

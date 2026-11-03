@@ -207,7 +207,8 @@ public class WatchaCheckInTaskTest {
         assertTrue(aiBodies.get(0).contains("\"model\":\"test-model\""));
         assertTrue(aiBodies.get(0).contains("体裁：猹评"));
         assertTrue(aiBodies.get(1).contains("体裁：帖子"));
-        assertTrue(aiBodies.get(1).contains("只问一个介绍里没写清的问题"));
+        assertTrue(aiBodies.get(1).contains("只抛一个介绍里没讲清的问题"));
+        assertTrue(aiBodies.get(0).contains("第一人称"));
         assertFalse(aiBodies.toString().contains("secret-password"));
         assertFalse(aiBodies.toString().contains("login-token"));
         JSONObject review = JSONUtil.parseObj(reviewBody.get());
@@ -230,6 +231,18 @@ public class WatchaCheckInTaskTest {
                 + "领取奖励：发布 1 篇猹评\n"
                 + "领取奖励：发布 1 篇帖子\n"
                 + "瓜子：136", task.getMessageBlocks().get(1).toString());
+    }
+
+    @Test
+    public void publishesBadVoteWhenCopywriterSaysSo() {
+        aiMode = "bad";
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals(1, reviewRequests.get());
+        JSONObject review = JSONUtil.parseObj(reviewBody.get());
+        assertEquals(Integer.valueOf(2), review.getInt("vote_value"));
     }
 
     @Test
@@ -525,6 +538,7 @@ public class WatchaCheckInTaskTest {
                 paragraphs.add(REVIEW_P2);
             }
             content.set("paragraphs", paragraphs);
+            content.set("vote", aiMode.startsWith("bad") ? "BAD" : "GOOD");
         } else {
             content.set("title", POST_TITLE);
             JSONArray paragraphs = new JSONArray();
