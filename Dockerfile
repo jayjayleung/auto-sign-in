@@ -1,5 +1,6 @@
 # ========== 第一阶段：Maven 编译打包 ==========
-FROM maven:3.8-openjdk-8 AS builder
+# 用 JDK 17 编译，配合 pom 里的 release=8，能挡住误用 Java 9+ API；运行时仍是 JDK 8。
+FROM maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /app
 # 先拷贝 pom.xml 单独下载依赖，利用 Docker 层缓存加速后续构建
 COPY pom.xml .
