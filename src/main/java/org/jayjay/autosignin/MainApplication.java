@@ -4,6 +4,7 @@ package org.jayjay.autosignin;
 import org.jayjay.autosignin.entity.NotificationSection;
 import org.jayjay.autosignin.task.MoDbCheckInTask;
 import org.jayjay.autosignin.task.TiDbCheckInTask;
+import org.jayjay.autosignin.task.WatchaCheckInTask;
 import org.jayjay.autosignin.task.YunqiaoCheckInTask;
 import org.jayjay.autosignin.task.YongHoneCheckInTask;
 import org.jayjay.autosignin.util.MessageRenderer;
@@ -22,6 +23,7 @@ public class MainApplication {
         sections.add(new TiDbCheckInTask().run().getNotificationSection());
         sections.add(new YongHoneCheckInTask().run().getNotificationSection());
         sections.add(new YunqiaoCheckInTask().run().getNotificationSection());
+        sections.add(new WatchaCheckInTask().run().getNotificationSection());
         System.out.println("================================================================================================================");
         System.out.print(MessageRenderer.toPlainText(sections));
         new NotificationSender().send(sections);

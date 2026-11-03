@@ -12,5 +12,6 @@ public class MessageCopyTest {
         assertEquals("TiDB 签到", new TiDbCheckInTask().buildNotificationSection().getTitle());
         assertEquals("云桥签到", new YunqiaoCheckInTask().buildNotificationSection().getTitle());
         assertEquals("永洪签到", new YongHoneCheckInTask().buildNotificationSection().getTitle());
+        assertEquals("观猹签到", new WatchaCheckInTask().buildNotificationSection().getTitle());
     }
 }

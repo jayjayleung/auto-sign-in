@@ -12,6 +12,7 @@
 - **[tidb](https://www.modb.pro/)** 签到
 - **[永洪社区](https://club.yonghongtech.com/)** 签到+抽抽乐
 - **[云桥积分中心](https://api.yunqiao.me/custom/93bbf0afef76f203)** 多账号签到
+- **[观猹任务中心](https://watcha.cn/quest)** 每日签到、每日猹评和每周发帖
 
 
 ## 如何使用?
@@ -49,6 +50,12 @@
 | YUNQIAO_PASSWORD_1 | 云桥账号 1 密码 | 否 |
 | YUNQIAO_USERNAME_2 | 云桥账号 2 邮箱 | 否 |
 | YUNQIAO_PASSWORD_2 | 云桥账号 2 密码 | 否 |
+| WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
+| WATCHA_PASSWORD | 观猹密码 | 否 |
+| WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
+| WATCHA_AI_BASE_URL | 观猹文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
+| WATCHA_AI_API_KEY | 观猹文案接口密钥 | 否 |
+| WATCHA_AI_MODEL | 观猹文案模型名 | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需要开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 订阅人邮箱地址(收件人)，如需多人订阅使用 `,` 分割，例如: `a@163.com,b@qq.com` | 否 |
@@ -105,6 +112,12 @@ cp .env.example .env
 | YUNQIAO_PASSWORD_1 | 云桥账号 1 密码 | 否 |
 | YUNQIAO_USERNAME_2 | 云桥账号 2 邮箱 | 否 |
 | YUNQIAO_PASSWORD_2 | 云桥账号 2 密码 | 否 |
+| WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
+| WATCHA_PASSWORD | 观猹密码 | 否 |
+| WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
+| WATCHA_AI_BASE_URL | 观猹文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
+| WATCHA_AI_API_KEY | 观猹文案接口密钥 | 否 |
+| WATCHA_AI_MODEL | 观猹文案模型名 | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 收件人邮箱，多个用 `,` 分割 | 否 |
@@ -114,6 +127,7 @@ cp .env.example .env
 说明:
 
 - 不需要某个站点时，留空对应账号密码即可。
+- 观猹使用任务中心的每日签到。`WATCHA_USERNAME` 填写登录用的邮箱或手机号。`WATCHA_PUBLISH` 设为 `true`，并且观猹文案接口 `WATCHA_AI_BASE_URL`、`WATCHA_AI_API_KEY`、`WATCHA_AI_MODEL` 三项都填写后，每天再发 1 篇当日推荐产品的猹评；本周帖子少于 3 篇时再发 1 篇。两次发布之间会间隔 20 到 90 秒。开关留空或文案接口留空则只签到。
 - TiDB 默认使用账号密码。`TIDB_LOGIN_MODE=cookie` 时改为使用 `TIDB_COOKIE`。两种模式只读取自己需要的配置。
 - 云桥只有一个账号时可直接使用 `YUNQIAO_USERNAME` / `YUNQIAO_PASSWORD`，无需添加 `_1`。
 - 云桥有多个账号时，第一个账号仍可使用无序号变量，第二个账号直接使用 `YUNQIAO_USERNAME_2` / `YUNQIAO_PASSWORD_2`，后续账号继续使用 `_3`、`_4`。
