@@ -311,7 +311,7 @@ public class WatchaCheckInTaskTest {
     public void reportsIncompleteCopyConfigurationAfterCheckIn() {
         Map<String, String> environment = account();
         environment.put("WATCHA_PUBLISH", "true");
-        environment.put("WATCHA_AI_MODEL", "test-model");
+        environment.put("AI_MODEL", "test-model");
 
         WatchaCheckInTask task = task(environment);
         task.run();
@@ -319,23 +319,6 @@ public class WatchaCheckInTaskTest {
         assertEquals(1, checkInRequests.get());
         assertEquals(0, aiRequests.get());
         assertEquals("任务结果：已跳过\n原因：文案接口配置不完整", task.getMessageBlocks().get(1).toString());
-    }
-
-    @Test
-    public void ignoresAnotherPlatformCopyConfiguration() {
-        Map<String, String> environment = account();
-        environment.put("WATCHA_PUBLISH", "true");
-        environment.put("AI_BASE_URL", baseUrl + "/v1");
-        environment.put("AI_API_KEY", "ai-test-key");
-        environment.put("AI_MODEL", "test-model");
-
-        WatchaCheckInTask task = questTask(environment);
-        task.run();
-
-        assertEquals(1, checkInRequests.get());
-        assertEquals(0, aiRequests.get());
-        assertEquals(0, reviewRequests.get());
-        assertEquals(1, task.getMessageBlocks().size());
     }
 
     @Test
@@ -389,9 +372,9 @@ public class WatchaCheckInTaskTest {
     private Map<String, String> accountWithAi() {
         Map<String, String> environment = account();
         environment.put("WATCHA_PUBLISH", "true");
-        environment.put("WATCHA_AI_BASE_URL", baseUrl + "/v1");
-        environment.put("WATCHA_AI_API_KEY", "ai-test-key");
-        environment.put("WATCHA_AI_MODEL", "test-model");
+        environment.put("AI_BASE_URL", baseUrl + "/v1");
+        environment.put("AI_API_KEY", "ai-test-key");
+        environment.put("AI_MODEL", "test-model");
         return environment;
     }
 

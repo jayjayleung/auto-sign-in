@@ -51,7 +51,7 @@ class WatchaAiCopywriter {
     private final AiClient client;
 
     WatchaAiCopywriter(Map<String, String> environment) {
-        this.client = new AiClient(environment, "WATCHA");
+        this.client = new AiClient(environment, "");
     }
 
     boolean isReady() {

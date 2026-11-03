@@ -10,7 +10,8 @@ import cn.hutool.json.JSONUtil;
 import java.util.Map;
 
 /**
- * 兼容 OpenAI 对话接口。每个平台读自己的环境变量，例如观猹使用 WATCHA_AI_BASE_URL。
+ * 兼容 OpenAI 对话接口。未指定平台时读取 AI_BASE_URL、AI_API_KEY、AI_MODEL。
+ * 指定平台时读取带前缀的同名变量，例如 OTHER_AI_BASE_URL。
  */
 public class AiClient {
 
@@ -21,16 +22,10 @@ public class AiClient {
     private final String model;
 
     public AiClient(Map<String, String> environment, String platform) {
-        if (StrUtil.isBlank(platform)) {
-            this.baseUrl = "";
-            this.apiKey = "";
-            this.model = "";
-            return;
-        }
-        String prefix = platform.trim().toUpperCase();
-        this.baseUrl = value(environment, prefix + "_AI_BASE_URL");
-        this.apiKey = value(environment, prefix + "_AI_API_KEY");
-        this.model = value(environment, prefix + "_AI_MODEL");
+        String prefix = StrUtil.isBlank(platform) ? "" : platform.trim().toUpperCase() + "_";
+        this.baseUrl = value(environment, prefix + "AI_BASE_URL");
+        this.apiKey = value(environment, prefix + "AI_API_KEY");
+        this.model = value(environment, prefix + "AI_MODEL");
     }
 
     public boolean isReady() {

@@ -53,9 +53,9 @@
 | WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
 | WATCHA_PASSWORD | 观猹密码 | 否 |
 | WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
-| WATCHA_AI_BASE_URL | 观猹文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
-| WATCHA_AI_API_KEY | 观猹文案接口密钥 | 否 |
-| WATCHA_AI_MODEL | 观猹文案模型名 | 否 |
+| AI_BASE_URL | 文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
+| AI_API_KEY | 文案接口密钥 | 否 |
+| AI_MODEL | 文案模型名 | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需要开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 订阅人邮箱地址(收件人)，如需多人订阅使用 `,` 分割，例如: `a@163.com,b@qq.com` | 否 |
@@ -115,9 +115,9 @@ cp .env.example .env
 | WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
 | WATCHA_PASSWORD | 观猹密码 | 否 |
 | WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
-| WATCHA_AI_BASE_URL | 观猹文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
-| WATCHA_AI_API_KEY | 观猹文案接口密钥 | 否 |
-| WATCHA_AI_MODEL | 观猹文案模型名 | 否 |
+| AI_BASE_URL | 文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
+| AI_API_KEY | 文案接口密钥 | 否 |
+| AI_MODEL | 文案模型名 | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 收件人邮箱，多个用 `,` 分割 | 否 |
@@ -131,7 +131,7 @@ cp .env.example .env
 - 云桥只有一个账号时可直接使用 `YUNQIAO_USERNAME` / `YUNQIAO_PASSWORD`，无需添加 `_1`。
 - 云桥有多个账号时，第一个账号仍可使用无序号变量，第二个账号直接使用 `YUNQIAO_USERNAME_2` / `YUNQIAO_PASSWORD_2`，后续账号继续使用 `_3`、`_4`。
 - 也可以从 `_1` 开始完整编号；无序号和 `_1` 同时配置时，以 `_1` 为准。
-- 观猹使用任务中心的每日签到。`WATCHA_USERNAME` 填写登录用的邮箱或手机号。`WATCHA_PUBLISH` 设为 `true`，并且观猹文案接口 `WATCHA_AI_BASE_URL`、`WATCHA_AI_API_KEY`、`WATCHA_AI_MODEL` 三项都填写后，每天再发 1 篇当日推荐产品的猹评；本周帖子少于 3 篇时再发 1 篇。两次发布之间会间隔 20 到 90 秒。开关留空或文案接口留空则只签到。
+- 观猹使用任务中心的每日签到。`WATCHA_USERNAME` 填写登录用的邮箱或手机号。`WATCHA_PUBLISH` 设为 `true`，并且文案接口 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL` 三项都填写后，每天再发 1 篇当日推荐产品的猹评；本周帖子少于 3 篇时再发 1 篇。两次发布之间会间隔 20 到 90 秒。开关留空或文案接口留空则只签到。
 - 通知方式可选，邮箱/PushPlus/Server酱可按需配置其一或多个。
 
 两个云桥账号的 `.env` 示例：
