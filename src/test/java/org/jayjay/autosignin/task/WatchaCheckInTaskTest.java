@@ -226,6 +226,7 @@ public class WatchaCheckInTaskTest {
         assertTrue(claimBodies.get(1).contains("101"));
         assertTrue(claimBodies.get(2).contains("102"));
         assertEquals("今日猹评：已发布 切问\n"
+                + "本周猹评：1/3\n"
                 + "本周帖子：已发布 " + POST_TITLE + "\n"
                 + "领取奖励：每日产品猹评\n"
                 + "领取奖励：发布 1 篇猹评\n"
@@ -271,7 +272,8 @@ public class WatchaCheckInTaskTest {
         assertEquals(0, aiRequests.get());
         assertEquals(0, reviewRequests.get());
         assertEquals(0, discussRequests.get());
-        assertEquals("今日猹评：今日已完成\n本周帖子：3/3", task.getMessageBlocks().get(1).toString());
+        assertEquals("今日猹评：今日已完成\n本周猹评：1/3\n本周帖子：3/3",
+                task.getMessageBlocks().get(1).toString());
     }
 
     @Test

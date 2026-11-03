@@ -110,7 +110,7 @@ class WatchaAiCopywriter {
             String content;
             try {
                 content = client.complete(system, prompt);
-            } catch (RuntimeException e) {
+            } catch (Exception e) {
                 lastFailure = StrUtil.blankToDefault(e.getMessage(), "文案生成失败");
                 feedback = "服务没有返回可用文案";
                 continue;

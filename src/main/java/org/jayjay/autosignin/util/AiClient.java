@@ -46,13 +46,18 @@ public class AiClient {
                 .set("temperature", 0.8)
                 .set("max_tokens", 3000)
                 .set("messages", messages);
-        HttpResponse response = HttpRequest.post(chatEndpoint(baseUrl))
-                .header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", "application/json;charset=UTF-8")
-                .header("Accept", "application/json")
-                .body(payload.toString())
-                .timeout(TIMEOUT)
-                .execute();
+        HttpResponse response;
+        try {
+            response = HttpRequest.post(chatEndpoint(baseUrl))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json;charset=UTF-8")
+                    .header("Accept", "application/json")
+                    .body(payload.toString())
+                    .timeout(TIMEOUT)
+                    .execute();
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("文案生成失败：" + briefMessage(e), e);
+        }
         String body = response.body();
         int status = response.getStatus();
         if (status < 200 || status >= 300) {
@@ -119,5 +124,13 @@ public class AiClient {
     private static String trimMessage(String message) {
         String text = message.replaceAll("[\\r\\n]+", " ").trim();
         return text.length() > 120 ? text.substring(0, 120) : text;
+    }
+
+    private static String briefMessage(RuntimeException e) {
+        String message = e.getMessage();
+        if (StrUtil.isBlank(message)) {
+            return e.getClass().getSimpleName();
+        }
+        return trimMessage(message);
     }
 }
