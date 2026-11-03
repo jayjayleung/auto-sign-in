@@ -14,14 +14,23 @@ import org.jayjay.autosignin.entity.NotificationSection;
 import org.jayjay.autosignin.util.BrowserUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.time.DateTimeException;
 import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -35,6 +44,8 @@ public class YongHoneCheckInTask extends CheckInTask {
     String checkInUrl = "https://club.yonghongtech.com/home.php?mod=space&uid=${user_id}&do=signlog&from=space";
     String cjUrl = "https://club.yonghongtech.com/plugin.php?id=hux_zp3:hux_zp3";
     String publishUrl = "https://club.yonghongtech.com/forum.php?mod=post&action=newthread&fid=80";
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+    private static final Pattern POST_DATE = Pattern.compile("(\\d{4})-(\\d{1,2})-(\\d{1,2})");
 
     @Override
     public NotificationSection buildNotificationSection() {
@@ -105,8 +116,9 @@ public class YongHoneCheckInTask extends CheckInTask {
                 loginBtn.dispose();
                 Thread.sleep(5000);
                 Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
+                String uid = null;
                 if (any.isPresent()) {
-                    String uid = any.get().getValue();
+                    uid = any.get().getValue();
                     System.out.println("[永洪] 登录成功，已获取会话 Cookie");
                     System.out.println(page.url());
                     //检查是否到了主页
@@ -178,13 +190,11 @@ public class YongHoneCheckInTask extends CheckInTask {
                 addMessage("抽奖结果：", cjMsg);
                 System.out.println("[永洪] 抽奖完成");
                 System.out.println(cj.url());
-                DayOfWeek dayOfWeek = LocalDateTime.now().getDayOfWeek();
+                DayOfWeek dayOfWeek = LocalDateTime.now(SHANGHAI).getDayOfWeek();
                 boolean doubleDay = dayOfWeek.getValue() % 2 == 0;
-                //开始发布签到帖子
-//                publishCheckIn(browser);
-                publishPost(browser, "签到", "签到", "签到", doubleDay ? 3 : 0);
-                //开始发布上班卡帖子
-                publishPost(browser, "上班卡", "滴~", "滴，上班卡~", !doubleDay ? 3 : 0);
+                Set<String> postedToday = postedToday(browser, uid);
+                publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", doubleDay ? 3 : 0);
+                publishUnlessPosted(browser, postedToday, "上班卡", "滴~", "滴，上班卡~", !doubleDay ? 3 : 0);
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -203,6 +213,93 @@ public class YongHoneCheckInTask extends CheckInTask {
     }
 
 
+
+    private Set<String> postedToday(Browser browser, String uid) {
+        if (StrUtil.isBlank(uid)) {
+            return Collections.emptySet();
+        }
+        try {
+            Page mine = browser.newPage();
+            mine.setUserAgent(userAgent);
+            mine.goTo("https://club.yonghongtech.com/home.php?mod=space&uid=" + uid + "&do=thread&view=me&from=space");
+            Thread.sleep(5000);
+            String html = mine.content();
+            if (!threadListReady(html)) {
+                System.out.println("[永洪] 未能确认今日是否已发帖，继续发布");
+                addMessage("未能确认今日是否已发帖，继续发布");
+                return Collections.emptySet();
+            }
+            Set<String> posted = postedTitlesOn(html, LocalDate.now(SHANGHAI));
+            System.out.println("[永洪] 今日已发帖：" + (posted.isEmpty() ? "无" : String.join("、", posted)));
+            return posted;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("[永洪] 未能确认今日是否已发帖，继续发布");
+            addMessage("未能确认今日是否已发帖，继续发布");
+            return Collections.emptySet();
+        }
+    }
+
+    private void publishUnlessPosted(Browser browser, Set<String> postedToday, String title, String content, String comment, int commentNum) {
+        if (postedToday.contains(title)) {
+            System.out.println("[永洪] " + title + "帖今天已发布，跳过");
+            addMessage(title, "帖今天已发布，跳过");
+            return;
+        }
+        publishPost(browser, title, content, comment, commentNum);
+    }
+
+    static boolean threadListReady(String html) {
+        return html != null && (html.contains("nex_forum_lists") || html.contains("nex_Mythreads_Tuiys"));
+    }
+
+    static Set<String> postedTitlesOn(String html, LocalDate day) {
+        Set<String> titles = new LinkedHashSet<>();
+        if (StrUtil.isBlank(html) || day == null) {
+            return titles;
+        }
+        Document document = Jsoup.parse(html);
+        for (Element card : document.select("div.nex_forum_lists")) {
+            String title = card.select("a.xst").text().trim();
+            if (!"签到".equals(title) && !"上班卡".equals(title)) {
+                continue;
+            }
+            if (postedOn(card, day)) {
+                titles.add(title);
+            }
+        }
+        return titles;
+    }
+
+    private static boolean postedOn(Element card, LocalDate day) {
+        Element dateNode = card.selectFirst("dd.nex_forumn_post_dateline");
+        if (dateNode == null) {
+            return false;
+        }
+        Element span = dateNode.selectFirst("span[title]");
+        String raw = span != null && StrUtil.isNotBlank(span.attr("title")) ? span.attr("title") : dateNode.text();
+        return sameDay(raw, day);
+    }
+
+    private static boolean sameDay(String raw, LocalDate day) {
+        if (StrUtil.isBlank(raw)) {
+            return false;
+        }
+        String text = raw.trim();
+        Matcher matcher = POST_DATE.matcher(text);
+        if (matcher.find()) {
+            try {
+                return LocalDate.of(
+                        Integer.parseInt(matcher.group(1)),
+                        Integer.parseInt(matcher.group(2)),
+                        Integer.parseInt(matcher.group(3))
+                ).equals(day);
+            } catch (DateTimeException e) {
+                return false;
+            }
+        }
+        return text.startsWith("今天");
+    }
 
     public void publishPost(Browser browser, String title, String content, String comment, int commentNum) {
         try {
