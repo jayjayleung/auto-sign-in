@@ -68,7 +68,7 @@ class WatchaAiCopywriter {
         if (anchors.size() < 2) {
             return DraftResult.failed("推荐产品介绍太短");
         }
-        int shape = (int) Math.floorMod(LocalDate.now(SHANGHAI).toEpochDay() + productId, REVIEW_SHAPES.length);
+        int shape = (int) Math.floorMod(LocalDate.now(SHANGHAI).toEpochDay() + productId, (long) REVIEW_SHAPES.length);
         String user = "体裁：猹评\n"
                 + productBrief(name, slogan, categories, text, anchors)
                 + "写法：" + REVIEW_SHAPES[shape] + "\n"
