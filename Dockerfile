@@ -1,5 +1,5 @@
 # ========== 第一阶段：Maven 编译打包 ==========
-# 用 JDK 17 编译，配合 pom 里的 release=8，能挡住误用 Java 9+ API；运行时仍是 JDK 8。
+# 用 JDK 17 编译，配合 pom 里的 release=17，能挡住误用高版本 API；运行时同样是 JDK 17。
 FROM maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /app
 # 先拷贝 pom.xml 单独下载依赖，利用 Docker 层缓存加速后续构建
@@ -10,7 +10,7 @@ COPY src ./src
 RUN mvn clean package -B -DskipTests
 
 # ========== 第二阶段：运行环境 ==========
-FROM eclipse-temurin:8-jdk-jammy
+FROM eclipse-temurin:17-jdk-jammy
 # 安装 cron（定时任务）、Chrome 运行所需的系统依赖库、中文字体
 # Chrome 依赖大量 GUI/X11 库，基础镜像中没有，必须安装
 RUN apt-get update && apt-get install -y --no-install-recommends \

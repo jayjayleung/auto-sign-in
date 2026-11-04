@@ -2,6 +2,8 @@ package org.jayjay.autosignin.task;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import cn.hutool.core.util.ArrayUtil;
+import cn.hutool.http.HttpRequest;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -33,6 +35,8 @@ public class TiDbCheckInTaskTest {
         loginRequests.set(0);
         checkInCookie.set(null);
         checkInCsrf.set(null);
+        // hutool 的 Cookie 仓库按主机共享且忽略端口，不清空会让相邻测试的 Cookie 串进来
+        HttpRequest.getCookieManager().getCookieStore().removeAll();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/login", this::handleLogin);
         server.createContext("/me", exchange -> json(exchange, 200,
@@ -60,7 +64,8 @@ public class TiDbCheckInTaskTest {
         task.run();
 
         assertEquals(1, loginRequests.get());
-        assertEquals("csrftoken=login-csrf; ssid=login-ssid", checkInCookie.get());
+        assertCookieContains(checkInCookie.get(), "csrftoken=login-csrf");
+        assertCookieContains(checkInCookie.get(), "ssid=login-ssid");
         assertEquals("login-csrf", checkInCsrf.get());
         assertEquals("用户名：tester", task.getMessageBlocks().get(0).toString());
         assertEquals("签到结果：签到成功", task.getMessageBlocks().get(2).toString());
@@ -80,7 +85,8 @@ public class TiDbCheckInTaskTest {
         task.run();
 
         assertEquals(0, loginRequests.get());
-        assertEquals("csrftoken=cookie-csrf; ssid=cookie-ssid", checkInCookie.get());
+        assertCookieContains(checkInCookie.get(), "csrftoken=cookie-csrf");
+        assertCookieContains(checkInCookie.get(), "ssid=cookie-ssid");
         assertEquals("cookie-csrf", checkInCsrf.get());
         assertEquals("当前积分：12", task.getMessageBlocks().get(1).toString());
         assertEquals("本次获得 1 积分，明日签到可获得 2 积分", task.getMessageBlocks().get(3).toString());
@@ -145,6 +151,12 @@ public class TiDbCheckInTaskTest {
         task.setPointsUrl(baseUrl + "/points");
         task.setCheckInUrl(baseUrl + "/checkin");
         return task;
+    }
+
+    /** HTTP 不保证多个 Set-Cookie 的先后顺序，只校验 Cookie 是否齐全。 */
+    private static void assertCookieContains(String cookieHeader, String expected) {
+        assertTrue("Cookie 头缺少 " + expected + "，实际为 " + cookieHeader,
+                cookieHeader != null && ArrayUtil.contains(cookieHeader.split(";\\s*"), expected));
     }
 
     private void handleLogin(HttpExchange exchange) throws IOException {
