@@ -121,6 +121,8 @@ public class YongHoneCheckInTask extends CheckInTask {
                 Thread.sleep(5000);
                 Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
                 String uid = null;
+                // 洪豆要等任务全部完成才能读到最终值，先占住它在通知里的位置：UID 和用户名之后
+                int pointsSlot = -1;
                 if (any.isPresent()) {
                     uid = any.get().getValue();
                     System.out.println("[永洪] 登录成功，已获取会话 Cookie");
@@ -150,7 +152,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                         System.out.println(user);
                         addMessage("用户名：", user);
                     }
-
+                    pointsSlot = messageBlocks.size();
                     // document.querySelector("a[title='个人设置'].innerText")
                     //有bug,老是找不到节点
 //                    page.hover(".hl_member_avator");
@@ -194,7 +196,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 // 论坛积分规则：发表主题和发表回复每天各只奖励一次（+5、+2），
                 // 多发帖和多条评论不再增加洪豆，只增加风控风险，所以每天只发一篇签到帖和一条评论。
                 publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", 1);
-                addPointsMessage(cj, pointsBefore);
+                addPointsMessage(cj, pointsBefore, pointsSlot);
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -230,9 +232,11 @@ public class YongHoneCheckInTask extends CheckInTask {
     }
 
     /**
-     * 读取任务全部完成后的洪豆数量并追加到通知末尾，取不到时退回任务前的值并说明原因。
+     * 读取任务全部完成后的洪豆数量，插入到用户名之后；取不到时退回任务前的值并说明原因。
+     *
+     * @param slot 用户名之后的位置，任务全部完成后才知道最终值，所以先占位再回填
      */
-    private void addPointsMessage(Page cj, String pointsBefore) {
+    private void addPointsMessage(Page cj, String pointsBefore, int slot) {
         String pointsAfter = null;
         try {
             cj.reload();
@@ -247,17 +251,31 @@ public class YongHoneCheckInTask extends CheckInTask {
                 return;
             }
             System.out.println("[永洪] 任务后洪豆读取失败，使用任务前的值：" + pointsBefore);
-            addMessage(new MessageBlock().addLine(
+            insertMessage(slot, new MessageBlock().addLine(
                     new MessageLine().append("洪豆：", pointsBefore, "（任务前，任务后读取失败）")));
             return;
         }
         System.out.println("[永洪] 任务后洪豆：" + pointsAfter);
+        insertMessage(slot, new MessageBlock().addLine("洪豆：", pointsAfter));
         Long increase = pointsIncrease(pointsBefore, pointsAfter);
-        addMessage("洪豆：", pointsAfter);
         if (increase != null && increase > 0) {
             System.out.println("[永洪] 本次获得洪豆：" + increase);
             addMessage("本次获得洪豆：", String.valueOf(increase));
         }
+    }
+
+    /**
+     * 把消息块插到指定位置；位置越界时追加到末尾。
+     */
+    private void insertMessage(int slot, MessageBlock block) {
+        if (block == null || block.isBlank()) {
+            return;
+        }
+        if (slot < 0 || slot > messageBlocks.size()) {
+            messageBlocks.add(block);
+            return;
+        }
+        messageBlocks.add(slot, block);
     }
 
     /**
