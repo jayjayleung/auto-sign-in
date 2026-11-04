@@ -8,6 +8,7 @@ import com.ruiyun.jvppeteer.api.core.Page;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
+import com.ruiyun.jvppeteer.common.PuppeteerLifeCycle;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.jayjay.autosignin.entity.MessageBlock;
@@ -48,6 +49,8 @@ public class YongHoneCheckInTask extends CheckInTask {
     String publishUrl = "https://club.yonghongtech.com/forum.php?mod=post&action=newthread&fid=80";
     private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
     private static final Pattern POST_DATE = Pattern.compile("(\\d{4})-(\\d{1,2})-(\\d{1,2})");
+    /** 发帖页等全部资源时经常接近 30 秒，这里给到 60 秒，并改为只等 DOM 就绪。 */
+    private static final Integer PUBLISH_PAGE_TIMEOUT_MILLIS = 60000;
 
     @Override
     public NotificationSection buildNotificationSection() {
@@ -174,8 +177,6 @@ public class YongHoneCheckInTask extends CheckInTask {
                 if (StrUtil.isNotBlank(pointsBefore)) {
                     System.out.println("[永洪] 任务前洪豆：" + pointsBefore);
                 }
-                // 洪豆要在任务全部完成后才能读到最终值，先占住它在通知里的位置
-                int pointsSlot = messageBlocks.size();
 //            page.waitForNavigation();
                 System.out.println("[永洪] 开始抽奖");
                 cj.click("#startbtn");
@@ -195,7 +196,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 Set<String> postedToday = postedToday(browser, uid);
                 publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", doubleDay ? 3 : 0);
                 publishUnlessPosted(browser, postedToday, "上班卡", "滴~", "滴，上班卡~", !doubleDay ? 3 : 0);
-                addPointsMessage(cj, pointsBefore, pointsSlot);
+                addPointsMessage(cj, pointsBefore);
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -231,10 +232,9 @@ public class YongHoneCheckInTask extends CheckInTask {
     }
 
     /**
-     * 读取任务全部完成后的洪豆数量，取不到时退回任务前的值并说明原因。
-     * 结果按 slot 插回原位置，保持「UID、用户名、洪豆、抽奖、发帖」的阅读顺序。
+     * 读取任务全部完成后的洪豆数量并追加到通知末尾，取不到时退回任务前的值并说明原因。
      */
-    private void addPointsMessage(Page cj, String pointsBefore, int slot) {
+    private void addPointsMessage(Page cj, String pointsBefore) {
         String pointsAfter = null;
         try {
             cj.reload();
@@ -249,16 +249,16 @@ public class YongHoneCheckInTask extends CheckInTask {
                 return;
             }
             System.out.println("[永洪] 任务后洪豆读取失败，使用任务前的值：" + pointsBefore);
-            insertMessage(slot, new MessageBlock().addLine(
+            addMessage(new MessageBlock().addLine(
                     new MessageLine().append("洪豆：", pointsBefore, "（任务前，任务后读取失败）")));
             return;
         }
         System.out.println("[永洪] 任务后洪豆：" + pointsAfter);
-        insertMessage(slot, new MessageBlock().addLine("洪豆：", pointsAfter));
         Long increase = pointsIncrease(pointsBefore, pointsAfter);
+        addMessage("洪豆：", pointsAfter);
         if (increase != null && increase > 0) {
             System.out.println("[永洪] 本次获得洪豆：" + increase);
-            insertMessage(slot + 1, new MessageBlock().addLine("本次获得洪豆：", String.valueOf(increase)));
+            addMessage("本次获得洪豆：", String.valueOf(increase));
         }
     }
 
@@ -284,20 +284,6 @@ public class YongHoneCheckInTask extends CheckInTask {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    /**
-     * 把消息块插到指定位置，位置越界时追加到末尾。
-     */
-    private void insertMessage(int slot, MessageBlock block) {
-        if (block == null || block.isBlank()) {
-            return;
-        }
-        if (slot < 0 || slot > messageBlocks.size()) {
-            messageBlocks.add(block);
-            return;
-        }
-        messageBlocks.add(slot, block);
     }
 
     private Set<String> postedToday(Browser browser, String uid) {
@@ -401,12 +387,48 @@ public class YongHoneCheckInTask extends CheckInTask {
         return text.startsWith("今天");
     }
 
+    /**
+     * 打开发帖页。论坛页面外部资源较多，整页 load 常常接近 30 秒，
+     * 这里放宽超时并只等 DOM 就绪，必要时再退回一次朴素跳转。
+     */
+    private void openPublishPage(Page page) throws Exception {
+        GoToOptions options = new GoToOptions();
+        options.setTimeout(PUBLISH_PAGE_TIMEOUT_MILLIS);
+        options.setWaitUntil(Collections.singletonList(PuppeteerLifeCycle.domcontentloaded));
+        try {
+            page.goTo(publishUrl, options);
+            return;
+        } catch (Exception e) {
+            System.out.println("[永洪] 打开发帖页超时，改为只等页面可访问：" + e.getMessage());
+        }
+        // 已经跳转过但资源迟迟不结束时，只要地址正确且能取到页面内容，就继续走后续流程
+        if (!publishPageReady(page)) {
+            page.goTo(publishUrl, options);
+        }
+    }
+
+    /**
+     * 判断发帖页是否已经可用：地址正确且能取到内容。
+     */
+    private boolean publishPageReady(Page page) {
+        try {
+            String url = page.url();
+            if (url == null || !url.contains("mod=post")) {
+                return false;
+            }
+            String content = page.content();
+            return StrUtil.isNotBlank(content);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public void publishPost(Browser browser, String title, String content, String comment, int commentNum) {
         try {
             System.out.println("[永洪] 开始发布" + title + "帖");
             Page page = browser.newPage();
             page.setUserAgent(userAgent);
-            page.goTo(publishUrl);
+            openPublishPage(page);
             Thread.sleep(5000);
             System.out.println(page.url());
             if (blockedByQuietHours(page.content())) {
@@ -462,7 +484,7 @@ public class YongHoneCheckInTask extends CheckInTask {
             System.out.println("[永洪] 开始发布签到帖");
             Page page = browser.newPage();
             page.setUserAgent(userAgent);
-            page.goTo(publishUrl);
+            openPublishPage(page);
             Thread.sleep(5000);
             System.out.println(page.url());
             if (blockedByQuietHours(page.content())) {
