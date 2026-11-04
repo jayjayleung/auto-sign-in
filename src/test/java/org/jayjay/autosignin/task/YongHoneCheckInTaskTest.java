@@ -9,6 +9,7 @@ import java.util.HashSet;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class YongHoneCheckInTaskTest {
@@ -65,5 +66,39 @@ public class YongHoneCheckInTaskTest {
                 + "<div>不能进行此操作的说明文字</div>";
 
         assertFalse(YongHoneCheckInTask.blockedByQuietHours(html));
+    }
+
+    @Test
+    public void parsesPointsFromLotteryPage() {
+        // 选择器 li:eq(2) 取第 3 个 li，font:eq(3) 取该 li 下第 4 个 font
+        String html = "<div id=\"ct\"><div><ul>"
+                + "<li><font>0</font><font>0</font><font>0</font><font>0</font></li>"
+                + "<li><font>1</font><font>1</font><font>1</font><font>1</font></li>"
+                + "<li><font>a</font><font>b</font><font>c</font><font>  75601  </font></li>"
+                + "</ul></div></div>";
+
+        assertEquals("75601", YongHoneCheckInTask.pointsOn(html));
+    }
+
+    @Test
+    public void returnsNullWhenPointsNodeIsMissing() {
+        assertNull(YongHoneCheckInTask.pointsOn(""));
+        assertNull(YongHoneCheckInTask.pointsOn(null));
+        assertNull(YongHoneCheckInTask.pointsOn("<div id=\"ct\"></div>"));
+    }
+
+    @Test
+    public void computesPointsIncrease() {
+        assertEquals(Long.valueOf(7L), YongHoneCheckInTask.pointsIncrease("75594", "75601"));
+        assertEquals(Long.valueOf(1L), YongHoneCheckInTask.pointsIncrease(" 10 ", "11"));
+    }
+
+    @Test
+    public void returnsNullIncreaseWhenNothingChangedOrUnknown() {
+        assertNull(YongHoneCheckInTask.pointsIncrease("75601", "75601"));
+        assertNull(YongHoneCheckInTask.pointsIncrease("75601", "75594"));
+        assertNull(YongHoneCheckInTask.pointsIncrease(null, "75601"));
+        assertNull(YongHoneCheckInTask.pointsIncrease("75594", ""));
+        assertNull(YongHoneCheckInTask.pointsIncrease("abc", "75601"));
     }
 }

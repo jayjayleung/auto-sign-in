@@ -10,6 +10,8 @@ import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.jayjay.autosignin.entity.MessageBlock;
+import org.jayjay.autosignin.entity.MessageLine;
 import org.jayjay.autosignin.entity.NotificationSection;
 import org.jayjay.autosignin.util.BrowserUtil;
 import org.jsoup.Jsoup;
@@ -167,15 +169,13 @@ public class YongHoneCheckInTask extends CheckInTask {
                 cj.goTo(cjUrl);
                 Thread.sleep(5000);
 
-                Document document = Jsoup.parse(cj.content());
-                Elements point = document.select("#ct div ul li:eq(2) > font:eq(3)");
-                if (point != null) {
-                    String pointStr = point.text();
-                    if (StrUtil.isNotBlank(pointStr)) {
-                        System.out.println(pointStr);
-                        addMessage("洪豆：", pointStr);
-                    }
+                // 抽奖和发帖都会增加洪豆，这里只记录任务前的值，用于任务后读取失败时兜底
+                String pointsBefore = pointsOn(cj.content());
+                if (StrUtil.isNotBlank(pointsBefore)) {
+                    System.out.println("[永洪] 任务前洪豆：" + pointsBefore);
                 }
+                // 洪豆要在任务全部完成后才能读到最终值，先占住它在通知里的位置
+                int pointsSlot = messageBlocks.size();
 //            page.waitForNavigation();
                 System.out.println("[永洪] 开始抽奖");
                 cj.click("#startbtn");
@@ -195,6 +195,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 Set<String> postedToday = postedToday(browser, uid);
                 publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", doubleDay ? 3 : 0);
                 publishUnlessPosted(browser, postedToday, "上班卡", "滴~", "滴，上班卡~", !doubleDay ? 3 : 0);
+                addPointsMessage(cj, pointsBefore, pointsSlot);
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -213,6 +214,91 @@ public class YongHoneCheckInTask extends CheckInTask {
     }
 
 
+
+    /**
+     * 从抽奖页面解析当前洪豆数量，页面上取不到时返回 null。
+     */
+    static String pointsOn(String html) {
+        if (StrUtil.isBlank(html)) {
+            return null;
+        }
+        Elements point = Jsoup.parse(html).select("#ct div ul li:eq(2) > font:eq(3)");
+        if (point == null || point.isEmpty()) {
+            return null;
+        }
+        String text = point.text().trim();
+        return StrUtil.isBlank(text) ? null : text;
+    }
+
+    /**
+     * 读取任务全部完成后的洪豆数量，取不到时退回任务前的值并说明原因。
+     * 结果按 slot 插回原位置，保持「UID、用户名、洪豆、抽奖、发帖」的阅读顺序。
+     */
+    private void addPointsMessage(Page cj, String pointsBefore, int slot) {
+        String pointsAfter = null;
+        try {
+            cj.reload();
+            cj.waitForNetworkIdle(new WaitForNetworkIdleOptions());
+            pointsAfter = pointsOn(cj.content());
+        } catch (Exception e) {
+            System.out.println("[永洪] 读取任务后洪豆失败：" + e.getMessage());
+        }
+        if (StrUtil.isBlank(pointsAfter)) {
+            if (StrUtil.isBlank(pointsBefore)) {
+                System.out.println("[永洪] 未能读取洪豆数量");
+                return;
+            }
+            System.out.println("[永洪] 任务后洪豆读取失败，使用任务前的值：" + pointsBefore);
+            insertMessage(slot, new MessageBlock().addLine(
+                    new MessageLine().append("洪豆：", pointsBefore, "（任务前，任务后读取失败）")));
+            return;
+        }
+        System.out.println("[永洪] 任务后洪豆：" + pointsAfter);
+        insertMessage(slot, new MessageBlock().addLine("洪豆：", pointsAfter));
+        Long increase = pointsIncrease(pointsBefore, pointsAfter);
+        if (increase != null && increase > 0) {
+            System.out.println("[永洪] 本次获得洪豆：" + increase);
+            insertMessage(slot + 1, new MessageBlock().addLine("本次获得洪豆：", String.valueOf(increase)));
+        }
+    }
+
+    /**
+     * 计算任务带来的洪豆增量。任一端缺失或无法解析为数字时返回 null，负数增量也按 null 处理。
+     */
+    static Long pointsIncrease(String before, String after) {
+        Long beforeValue = parsePoints(before);
+        Long afterValue = parsePoints(after);
+        if (beforeValue == null || afterValue == null) {
+            return null;
+        }
+        long increase = afterValue - beforeValue;
+        return increase > 0 ? increase : null;
+    }
+
+    private static Long parsePoints(String value) {
+        if (StrUtil.isBlank(value)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 把消息块插到指定位置，位置越界时追加到末尾。
+     */
+    private void insertMessage(int slot, MessageBlock block) {
+        if (block == null || block.isBlank()) {
+            return;
+        }
+        if (slot < 0 || slot > messageBlocks.size()) {
+            messageBlocks.add(block);
+            return;
+        }
+        messageBlocks.add(slot, block);
+    }
 
     private Set<String> postedToday(Browser browser, String uid) {
         if (StrUtil.isBlank(uid)) {
@@ -358,6 +444,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 System.out.println("[永洪] " + title + "帖发布成功");
             } else {
                 System.out.println("[永洪] " + title + "帖发布结果未确认");
+                addMessage(title, "帖发布结果未确认，请查看日志");
             }
         } catch (Exception e) {
             e.printStackTrace();
