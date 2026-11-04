@@ -23,7 +23,6 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.DateTimeException;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -191,11 +190,10 @@ public class YongHoneCheckInTask extends CheckInTask {
                 addMessage("抽奖结果：", cjMsg);
                 System.out.println("[永洪] 抽奖完成");
                 System.out.println(cj.url());
-                DayOfWeek dayOfWeek = LocalDateTime.now(SHANGHAI).getDayOfWeek();
-                boolean doubleDay = dayOfWeek.getValue() % 2 == 0;
                 Set<String> postedToday = postedToday(browser, uid);
-                publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", doubleDay ? 3 : 0);
-                publishUnlessPosted(browser, postedToday, "上班卡", "滴~", "滴，上班卡~", !doubleDay ? 3 : 0);
+                // 论坛积分规则：发表主题和发表回复每天各只奖励一次（+5、+2），
+                // 多发帖和多条评论不再增加洪豆，只增加风控风险，所以每天只发一篇签到帖和一条评论。
+                publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", 1);
                 addPointsMessage(cj, pointsBefore);
                 success = true;
             } catch (Exception e) {
@@ -452,15 +450,13 @@ public class YongHoneCheckInTask extends CheckInTask {
                 }
             }
             if (flag) {
-                if(commentNum > 0) {
-                    System.out.println("[永洪] 开始发布" + title + "帖评论");
-                    for (int i = 0; i < 3; i++) {
-                        Thread.sleep(2000);
-                        page.type("#fastpostmessage", comment);
-                        Thread.sleep(2000);
-                        page.evaluate("document.getElementById('fastpostsubmit').click();");
-                        Thread.sleep(2000);
-                    }
+                for (int i = 0; i < commentNum; i++) {
+                    System.out.println("[永洪] 发布" + title + "帖评论 " + (i + 1) + "/" + commentNum);
+                    Thread.sleep(2000);
+                    page.type("#fastpostmessage", comment);
+                    Thread.sleep(2000);
+                    page.evaluate("document.getElementById('fastpostsubmit').click();");
+                    Thread.sleep(2000);
                 }
                 addMessage(title, "帖发布成功");
                 System.out.println("[永洪] " + title + "帖发布成功");
@@ -508,18 +504,13 @@ public class YongHoneCheckInTask extends CheckInTask {
                 }
             }
             if (flag) {
-                System.out.println("[永洪] 开始发布签到帖评论");
-                for (int i = 0; i < 3; i++) {
-                    Thread.sleep(2000);
-                    page.type("#fastpostmessage", "签到");
-//                Thread.sleep(2000);
-//                page.$("#fastpostsubmit").click();
-//                page.evaluate("document.getElementById('fastpostmessage').innerText='签到'");
-                    Thread.sleep(2000);
-                    page.evaluate("document.getElementById('fastpostsubmit').click();");
-                    Thread.sleep(2000);
-                }
-                addMessage("签到帖发布成功，获得洪豆：25");
+                System.out.println("[永洪] 发布签到帖评论");
+                Thread.sleep(2000);
+                page.type("#fastpostmessage", "签到");
+                Thread.sleep(2000);
+                page.evaluate("document.getElementById('fastpostsubmit').click();");
+                Thread.sleep(2000);
+                addMessage("签到帖发布成功");
             }
             System.out.println("[永洪] 签到帖发布流程结束");
         } catch (Exception e) {
