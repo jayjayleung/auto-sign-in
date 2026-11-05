@@ -113,8 +113,12 @@ public class WatchaCheckInTask extends CheckInTask {
             System.out.println("[观猹] 签到任务结束");
             return this;
         }
+        // 签到前的余额作为基准，任务全部结束后再读一次，差值就是本次签到和领奖的总收入
+        Integer guaziBefore = loadGuazi(token);
+        int checkInSlot = messageBlocks.size();
+        CheckInReport checkIn = null;
         try {
-            performCheckIn(token, loadDisplayName(token));
+            checkIn = performCheckIn(token, loadDisplayName(token));
         } catch (Exception e) {
             String error = safeMessage(e.getMessage());
             System.err.println("[观猹] 签到失败：" + error);
@@ -123,18 +127,18 @@ public class WatchaCheckInTask extends CheckInTask {
                     .addLine("原因：", error));
         }
         completeQuests(token);
+        reportGuazi(token, checkIn, checkInSlot, guaziBefore);
         System.out.println("[观猹] 签到任务结束");
         return this;
     }
 
-    private void performCheckIn(String token, String displayName) {
+    private CheckInReport performCheckIn(String token, String displayName) {
         JSONObject today = requestData(authorized(HttpRequest.get(todayUrl), token).execute(), "查询今日签到");
         boolean checkedIn = boolValue(today, "checked_in");
         int streak = numberValue(today, "streak_days");
         if (checkedIn) {
-            report(displayName, streak, loadGuazi(token), "今日已签到", null);
             System.out.println("[观猹] 今日已签到");
-            return;
+            return new CheckInReport(displayName, streak, "今日已签到", null);
         }
 
         System.out.println("[观猹] 开始签到");
@@ -145,9 +149,8 @@ public class WatchaCheckInTask extends CheckInTask {
                     .execute(), "签到");
         } catch (IllegalStateException e) {
             if (safeMessage(e.getMessage()).contains("已签到")) {
-                report(displayName, streak, loadGuazi(token), "今日已签到", null);
                 System.out.println("[观猹] 今日已签到");
-                return;
+                return new CheckInReport(displayName, streak, "今日已签到", null);
             }
             throw e;
         }
@@ -156,8 +159,50 @@ public class WatchaCheckInTask extends CheckInTask {
         }
         Integer reward = checkInData.containsKey("reward_count")
                 ? numberValue(checkInData, "reward_count") : null;
-        report(displayName, streak, loadGuazi(token), "签到成功", reward);
         System.out.println("[观猹] 签到结果：签到成功");
+        return new CheckInReport(displayName, streak, "签到成功", reward);
+    }
+
+    /**
+     * 任务全部结束后读取瓜子余额：签到信息插回原来的位置，本次获得瓜子写在最后一行。
+     */
+    private void reportGuazi(String token, CheckInReport checkIn, int checkInSlot, Integer guaziBefore) {
+        Integer guaziAfter = loadGuazi(token);
+        if (checkIn != null) {
+            MessageBlock message = new MessageBlock();
+            if (StrUtil.isNotBlank(checkIn.displayName)) {
+                message.addLine("用户名：", sanitize(checkIn.displayName));
+            }
+            if (guaziAfter != null) {
+                message.addLine("瓜子：", String.valueOf(guaziAfter));
+            } else if (guaziBefore != null) {
+                message.addLine("瓜子：", String.valueOf(guaziBefore), "（签到前，任务后读取失败）");
+            }
+            message.addLine("连续签到：", String.valueOf(checkIn.streak), " 天");
+            message.addLine("签到结果：", checkIn.result, rewardSuffix(checkIn.reward));
+            messageBlocks.add(Math.min(checkInSlot, messageBlocks.size()), message);
+        }
+        int checkInReward = checkIn == null || checkIn.reward == null ? 0 : checkIn.reward;
+        Integer total = guaziIncrease(guaziBefore, guaziAfter, checkInReward);
+        if (total != null && !messageBlocks.isEmpty()) {
+            System.out.println("[观猹] 本次获得瓜子：" + total);
+            messageBlocks.get(messageBlocks.size() - 1).addLine("本次获得瓜子：", String.valueOf(total));
+        }
+    }
+
+    /**
+     * 本次获得的瓜子总数。只有签到奖励时签到结果里已经写了，不再重复显示，返回 null。
+     */
+    static Integer guaziIncrease(Integer before, Integer after, int checkInReward) {
+        if (before == null || after == null) {
+            return null;
+        }
+        int increase = after - before;
+        return increase > 0 && increase != checkInReward ? increase : null;
+    }
+
+    private static String rewardSuffix(Integer reward) {
+        return reward != null && reward > 0 ? "，获得 " + reward + " 瓜子" : "";
     }
 
     private void completeQuests(String token) {
@@ -198,12 +243,6 @@ public class WatchaCheckInTask extends CheckInTask {
                 publishPosts(items, token, run);
             }
             claimWithRetry(token, run);
-            if (run.published || run.claimed) {
-                Integer guazi = loadGuazi(token);
-                if (guazi != null) {
-                    run.block.addLine("瓜子：", String.valueOf(guazi));
-                }
-            }
         } catch (Exception e) {
             String error = safeMessage(e.getMessage());
             System.err.println("[观猹] 任务失败：" + error);
@@ -261,7 +300,7 @@ public class WatchaCheckInTask extends CheckInTask {
         }
         claimQuest(items.getJSONObject("daily.product_review"), token, run);
         for (String code : CLAIM_CODES) {
-            claimItems(items.getJSONObject(code), token, run);
+            claimItems(code, items.getJSONObject(code), token, run);
         }
     }
 
@@ -325,8 +364,7 @@ public class WatchaCheckInTask extends CheckInTask {
             requestData(authorized(HttpRequest.post(questUrl(questId, "/claim-reward")), token)
                     .body(claimBody(quest).toString())
                     .execute(), "领取奖励");
-            run.block.addLine("领取奖励：", sanitize(name));
-            run.claimed = true;
+            run.block.addLine("领取奖励：", sanitize(name), rewardSuffix(guaziReward(quest.get("reward"))));
         } catch (RuntimeException e) {
             if (isCaptcha(e)) {
                 throw e;
@@ -336,7 +374,7 @@ public class WatchaCheckInTask extends CheckInTask {
         }
     }
 
-    private void claimItems(JSONObject quest, String token, QuestRun run) {
+    private void claimItems(String code, JSONObject quest, String token, QuestRun run) {
         if (quest == null) {
             return;
         }
@@ -345,6 +383,7 @@ public class WatchaCheckInTask extends CheckInTask {
             return;
         }
         long questId = longValue(quest, "quest_id");
+        String questName = quest.getStr("name");
         for (int index = 0; index < items.size(); index++) {
             JSONObject item = items.getJSONObject(index);
             if (item == null || !"claimable".equals(item.getStr("status"))) {
@@ -360,8 +399,8 @@ public class WatchaCheckInTask extends CheckInTask {
                 requestData(authorized(HttpRequest.post(questUrl(questId, path)), token)
                         .body(claimBody(quest).toString())
                         .execute(), "领取奖励");
-                run.block.addLine("领取奖励：", sanitize(title));
-                run.claimed = true;
+                run.block.addLine("领取奖励：", sanitize(claimLabel(code, questName, item, items.size())),
+                        rewardSuffix(guaziReward(item.get("reward"))));
             } catch (RuntimeException e) {
                 if (isCaptcha(e)) {
                     throw e;
@@ -370,6 +409,50 @@ public class WatchaCheckInTask extends CheckInTask {
                 run.block.addLine("原因：", safeMessage(e.getMessage()));
             }
         }
+    }
+
+    /**
+     * 子任务的展示名。每周任务的标题是「发布 N 篇猹评」，读起来像动作，改成「每周猹评 N/3 篇」；
+     * 里程碑附上描述说明累计篇数；其他子任务前面带上任务名。
+     */
+    static String claimLabel(String code, String questName, JSONObject item, int tierCount) {
+        String title = StrUtil.blankToDefault(item.getStr("title"), StrUtil.nullToEmpty(item.getStr("item_id"))).trim();
+        String name = StrUtil.trimToEmpty(questName);
+        String quest = StrUtil.nullToEmpty(code);
+        int target = numberValue(item.getJSONObject("progress"), "target");
+        if (quest.startsWith("weekly.") && !name.isEmpty() && target > 0 && tierCount > 0) {
+            return name + " " + target + "/" + tierCount + " 篇";
+        }
+        if (quest.startsWith("milestone.")) {
+            Object description = item.get("description");
+            String text = description instanceof CharSequence ? description.toString().trim() : "";
+            return text.isEmpty() ? title : title + "（" + text + "）";
+        }
+        if (name.isEmpty() || title.startsWith(name)) {
+            return title;
+        }
+        return name + " · " + title;
+    }
+
+    /**
+     * 奖励里的瓜子数量，结构为 {"items":[{"promotion_name":"瓜子","count":30}]}，和网页的计算方式一致。
+     */
+    static int guaziReward(Object reward) {
+        if (!(reward instanceof JSONObject)) {
+            return 0;
+        }
+        JSONArray items = ((JSONObject) reward).getJSONArray("items");
+        if (items == null) {
+            return 0;
+        }
+        int total = 0;
+        for (int index = 0; index < items.size(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            if (item != null && GUAZI_NAME.equals(item.getStr("promotion_name"))) {
+                total += Math.max(0, numberValue(item, "count"));
+            }
+        }
+        return total;
     }
 
     private void publishReviews(JSONObject items, String token, QuestRun run) {
@@ -746,22 +829,6 @@ public class WatchaCheckInTask extends CheckInTask {
         return data == null ? JSONUtil.createObj() : data;
     }
 
-    private void report(String displayName, int streak, Integer guazi, String result, Integer reward) {
-        MessageBlock message = new MessageBlock();
-        if (StrUtil.isNotBlank(displayName)) {
-            message.addLine("用户名：", sanitize(displayName));
-        }
-        message.addLine("连续签到：", String.valueOf(streak), " 天");
-        if (guazi != null) {
-            message.addLine("瓜子：", String.valueOf(guazi));
-        }
-        message.addLine("签到结果：", result);
-        if (reward != null) {
-            message.addLine("本次获得 ", String.valueOf(reward), " 瓜子");
-        }
-        addMessage(message);
-    }
-
     private Map<String, String> headers() {
         Map<String, String> headers = commonHeaders();
         headers.put("Origin", DEFAULT_BASE_URL);
@@ -850,9 +917,22 @@ public class WatchaCheckInTask extends CheckInTask {
         private final Set<Integer> usedProductIds = new LinkedHashSet<Integer>();
         private List<LoadedProduct> products;
         private boolean published;
-        private boolean claimed;
         private boolean aiDown;
         private int reviewedProductId;
+    }
+
+    private static final class CheckInReport {
+        private final String displayName;
+        private final int streak;
+        private final String result;
+        private final Integer reward;
+
+        private CheckInReport(String displayName, int streak, String result, Integer reward) {
+            this.displayName = displayName;
+            this.streak = streak;
+            this.result = result;
+            this.reward = reward;
+        }
     }
 
     private static final class LoadedProduct {

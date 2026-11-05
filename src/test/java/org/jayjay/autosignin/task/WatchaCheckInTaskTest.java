@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class WatchaCheckInTaskTest {
@@ -34,6 +35,8 @@ public class WatchaCheckInTaskTest {
     private String baseUrl;
     private final AtomicInteger checkInRequests = new AtomicInteger();
     private final AtomicInteger balanceRequests = new AtomicInteger();
+    private final AtomicInteger claimedGuazi = new AtomicInteger();
+    private volatile boolean balanceFailsAfterFirst;
     private final AtomicReference<String> authorization = new AtomicReference<>();
     private final AtomicReference<String> loginBody = new AtomicReference<>();
     private volatile boolean checkedIn;
@@ -70,6 +73,8 @@ public class WatchaCheckInTaskTest {
     public void setUp() throws IOException {
         checkInRequests.set(0);
         balanceRequests.set(0);
+        claimedGuazi.set(0);
+        balanceFailsAfterFirst = false;
         authorization.set(null);
         loginBody.set(null);
         checkedIn = false;
@@ -151,7 +156,7 @@ public class WatchaCheckInTaskTest {
         assertEquals(0, checkInRequests.get());
         assertEquals("Bearer login-token", authorization.get());
         assertEquals(1, task.getMessageBlocks().size());
-        assertEquals("用户名：观猹用户\n连续签到：4 天\n瓜子：128\n签到结果：今日已签到",
+        assertEquals("用户名：观猹用户\n瓜子：120\n连续签到：4 天\n签到结果：今日已签到",
                 task.getMessageBlocks().get(0).toString());
         assertFalse(task.getMessageBlocks().toString().contains("secret-password"));
         assertFalse(task.getMessageBlocks().toString().contains("login-token"));
@@ -170,9 +175,79 @@ public class WatchaCheckInTaskTest {
         assertEquals(1, checkInRequests.get());
         assertTrue(checkedIn);
         assertEquals(1, task.getMessageBlocks().size());
-        assertEquals("用户名：观猹用户\n连续签到：5 天\n瓜子：128\n签到结果：签到成功\n本次获得 8 瓜子",
+        assertEquals("用户名：观猹用户\n瓜子：128\n连续签到：5 天\n签到结果：签到成功，获得 8 瓜子",
                 task.getMessageBlocks().get(0).toString());
         assertFalse(task.buildNotificationSection().toString().contains("secret-password"));
+    }
+
+    @Test
+    public void keepsBalanceBeforeCheckInWhenFinalBalanceIsUnavailable() {
+        balanceFailsAfterFirst = true;
+
+        WatchaCheckInTask task = task(account());
+        task.run();
+
+        assertEquals(1, task.getMessageBlocks().size());
+        assertEquals("用户名：观猹用户\n瓜子：120（签到前，任务后读取失败）\n连续签到：5 天\n签到结果：签到成功，获得 8 瓜子",
+                task.getMessageBlocks().get(0).toString());
+    }
+
+    @Test
+    public void reportsTotalWhenOnlyQuestRewardsAreEarned() {
+        checkedIn = true;
+        product7Reviewed = true;
+        postedToday = true;
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals("用户名：观猹用户\n瓜子：180\n连续签到：4 天\n签到结果：今日已签到",
+                task.getMessageBlocks().get(0).toString());
+        String quest = task.getMessageBlocks().get(1).toString();
+        assertTrue(quest.contains("领取奖励：每日产品猹评，获得 30 瓜子\n"));
+        assertTrue(quest.contains("领取奖励：每周猹评 1/3 篇，获得 30 瓜子\n"));
+        assertTrue(quest.endsWith("\n本次获得瓜子：60"));
+    }
+
+    @Test
+    public void labelsClaimedItemsByQuestType() {
+        JSONObject weekly = JSONUtil.createObj()
+                .set("title", "发布 2 篇猹评")
+                .set("progress", JSONUtil.createObj().set("current", 2).set("target", 2));
+        JSONObject milestone = JSONUtil.createObj()
+                .set("title", "笔耕不辍 I")
+                .set("description", "发布 20 篇猹评")
+                .set("progress", JSONUtil.createObj().set("current", 20).set("target", 20));
+        JSONObject newbie = JSONUtil.createObj().set("title", "完善个人资料");
+        JSONObject noTarget = JSONUtil.createObj().set("title", "发布 1 篇帖子");
+
+        assertEquals("每周猹评 2/3 篇", WatchaCheckInTask.claimLabel("weekly.review", "每周猹评", weekly, 3));
+        assertEquals("笔耕不辍 I（发布 20 篇猹评）",
+                WatchaCheckInTask.claimLabel("milestone.review", "笔耕不辍", milestone, 3));
+        assertEquals("新手任务 · 完善个人资料",
+                WatchaCheckInTask.claimLabel("growth.newbie.v2", "新手任务", newbie, 4));
+        assertEquals("每周发帖 · 发布 1 篇帖子",
+                WatchaCheckInTask.claimLabel("weekly.posting", "每周发帖", noTarget, 3));
+    }
+
+    @Test
+    public void sumsOnlyGuaziRewards() {
+        JSONObject reward = JSONUtil.parseObj("{\"items\":[{\"promotion_name\":\"瓜子\",\"count\":30},"
+                + "{\"promotion_name\":\"兑换码\",\"count\":1},{\"promotion_name\":\"瓜子\",\"count\":5}]}");
+
+        assertEquals(35, WatchaCheckInTask.guaziReward(reward));
+        assertEquals(0, WatchaCheckInTask.guaziReward(JSONUtil.parseObj("{\"items\":[]}")));
+        assertEquals(0, WatchaCheckInTask.guaziReward(null));
+    }
+
+    @Test
+    public void omitsTotalWhenItOnlyRepeatsCheckInReward() {
+        assertNull(WatchaCheckInTask.guaziIncrease(120, 128, 8));
+        assertNull(WatchaCheckInTask.guaziIncrease(120, 120, 0));
+        assertNull(WatchaCheckInTask.guaziIncrease(null, 128, 0));
+        assertNull(WatchaCheckInTask.guaziIncrease(120, null, 0));
+        assertEquals(Integer.valueOf(83), WatchaCheckInTask.guaziIncrease(120, 203, 8));
+        assertEquals(Integer.valueOf(60), WatchaCheckInTask.guaziIncrease(120, 180, 0));
     }
 
     @Test
@@ -232,13 +307,15 @@ public class WatchaCheckInTaskTest {
         assertTrue(claimBodies.get(0).contains("100"));
         assertTrue(claimBodies.get(1).contains("101"));
         assertTrue(claimBodies.get(2).contains("102"));
+        assertEquals("用户名：观猹用户\n瓜子：203\n连续签到：5 天\n签到结果：签到成功，获得 8 瓜子",
+                task.getMessageBlocks().get(0).toString());
         assertEquals("今日猹评：已发布 切问\n"
                 + "本周猹评：1/3\n"
                 + "本周帖子：已发布 " + POST_TITLE + "\n"
-                + "领取奖励：每日产品猹评\n"
-                + "领取奖励：发布 1 篇猹评\n"
-                + "领取奖励：发布 1 篇帖子\n"
-                + "瓜子：136", task.getMessageBlocks().get(1).toString());
+                + "领取奖励：每日产品猹评，获得 30 瓜子\n"
+                + "领取奖励：每周猹评 1/3 篇，获得 30 瓜子\n"
+                + "领取奖励：每周发帖 1/3 篇，获得 15 瓜子\n"
+                + "本次获得瓜子：83", task.getMessageBlocks().get(1).toString());
     }
 
     @Test
@@ -540,7 +617,11 @@ public class WatchaCheckInTaskTest {
     private void handleBalances(HttpExchange exchange) throws IOException {
         readBody(exchange);
         int count = balanceRequests.incrementAndGet();
-        int amount = count > 1 ? 136 : 128;
+        if (balanceFailsAfterFirst && count > 1) {
+            json(exchange, 500, "{\"statusCode\":500,\"message\":\"busy\"}");
+            return;
+        }
+        int amount = 120 + (checkInRequests.get() > 0 ? 8 : 0) + claimedGuazi.get();
         json(exchange, 200, "{\"statusCode\":200,\"data\":{\"balances\":[{\"promotion_name\":\"瓜子\",\"amount\":"
                 + amount + "},{\"promotion_name\":\"其他\",\"amount\":1}]}}");
     }
@@ -559,10 +640,13 @@ public class WatchaCheckInTaskTest {
             claimBodies.add(body);
             if (path.contains("/completion-items/review_1/")) {
                 reviewItemClaimed = true;
+                claimedGuazi.addAndGet(30);
             } else if (path.contains("/completion-items/posting_1/")) {
                 postingClaimed = true;
+                claimedGuazi.addAndGet(15);
             } else {
                 dailyClaimed = true;
+                claimedGuazi.addAndGet(30);
             }
             json(exchange, 200, "{\"statusCode\":200,\"data\":{}}");
             return;
@@ -672,7 +756,17 @@ public class WatchaCheckInTaskTest {
                 .set("status", status)
                 .set("quest_instance_id", 100)
                 .set("state", JSONUtil.createObj().set("product_ids", ids).set("reviewed", product7Reviewed))
+                .set("reward", guazi(30))
                 .set("completion_items", new JSONArray());
+    }
+
+    private static JSONObject guazi(int count) {
+        JSONObject item = JSONUtil.createObj()
+                .set("type", "asset")
+                .set("template_id", 103)
+                .set("promotion_name", "瓜子")
+                .set("count", count);
+        return JSONUtil.createObj().set("items", JSONUtil.createArray().put(item));
     }
 
     private static JSONObject weeklyQuest(int questId, String name, String itemPrefix, int count,
@@ -687,6 +781,7 @@ public class WatchaCheckInTaskTest {
             completion.add(JSONUtil.createObj()
                     .set("item_id", itemPrefix + "_" + tier)
                     .set("title", "发布 " + tier + " 篇" + label)
+                    .set("reward", guazi("review".equals(itemPrefix) ? 30 : 15))
                     .set("status", itemStatus)
                     .set("progress", JSONUtil.createObj().set("current", Math.min(count, tier)).set("target", tier)));
         }
