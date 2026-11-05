@@ -5,6 +5,8 @@ import com.ruiyun.jvppeteer.api.core.Browser;
 import com.ruiyun.jvppeteer.api.core.ElementHandle;
 import com.ruiyun.jvppeteer.api.core.Frame;
 import com.ruiyun.jvppeteer.api.core.Page;
+import com.ruiyun.jvppeteer.api.core.Response;
+import com.ruiyun.jvppeteer.api.events.PageEvents;
 import com.ruiyun.jvppeteer.cdp.core.Puppeteer;
 import com.ruiyun.jvppeteer.cdp.entities.*;
 import com.ruiyun.jvppeteer.common.Product;
@@ -22,6 +24,8 @@ import org.jsoup.select.Elements;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -29,8 +33,11 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -50,6 +57,9 @@ public class YongHoneCheckInTask extends CheckInTask {
     private static final Pattern POST_DATE = Pattern.compile("(\\d{4})-(\\d{1,2})-(\\d{1,2})");
     /** 发帖页等全部资源时经常接近 30 秒，这里给到 60 秒，并改为只等 DOM 就绪。 */
     private static final Integer PUBLISH_PAGE_TIMEOUT_MILLIS = 60000;
+    /** 洪豆是论坛的第 2 项积分（extcredits2），creditbase 按 D 分隔，下标即积分序号。 */
+    private static final int POINTS_CREDIT_INDEX = 2;
+    private static final String DAILY_LOGIN_RULE = "每天登录";
 
     @Override
     public NotificationSection buildNotificationSection() {
@@ -63,6 +73,8 @@ public class YongHoneCheckInTask extends CheckInTask {
 
     @Override
     public CheckInTask run() {
+        // 每日登录奖励只在当天首次登录时返回，重试时不会再出现，所以放在重试循环外保留
+        String pointsBeforeLogin = null;
         //开启重试，有时候网页打开失败
         while (!success && retryCount <= maxRetries) {
             if (retryCount > 0) {
@@ -114,11 +126,27 @@ public class YongHoneCheckInTask extends CheckInTask {
 
                 page.type("input[name='username']", yhUsername);
                 page.type("input[name='password']", yhPassword);
+                // 登录奖励的 Cookie 会被页面脚本立即清掉，只能从登录响应头里截取
+                List<String> creditSetCookies = new CopyOnWriteArrayList<>();
+                page.on(PageEvents.Response, (Consumer<Response>) response -> {
+                    String header = setCookieHeader(response);
+                    if (header.contains("credit")) {
+                        creditSetCookies.add(header);
+                    }
+                });
                 ElementHandle loginBtn = page.$("button[name='loginsubmit']");
                 System.out.println("[永洪] 提交登录");
                 loginBtn.click();
                 loginBtn.dispose();
                 Thread.sleep(5000);
+                for (String header : creditSetCookies) {
+                    String base = loginPointsBase(header);
+                    if (base != null) {
+                        pointsBeforeLogin = base;
+                        System.out.println("[永洪] 今日首次登录，登录前洪豆：" + base);
+                        break;
+                    }
+                }
                 Optional<Cookie> any = page.cookies().stream().filter(cookie -> "user_id".equalsIgnoreCase(cookie.getName())).findAny();
                 String uid = null;
                 // 洪豆要等任务全部完成才能读到最终值，先占住它在通知里的位置：UID 和用户名之后
@@ -173,7 +201,7 @@ public class YongHoneCheckInTask extends CheckInTask {
                 cj.goTo(cjUrl);
                 Thread.sleep(5000);
 
-                // 抽奖和发帖都会增加洪豆，这里只记录任务前的值，用于任务后读取失败时兜底
+                // 抽奖和发帖都会增加洪豆，这里记录任务前的值，用于任务后读取失败时兜底，以及非首次登录时的增量基准
                 String pointsBefore = pointsOn(cj.content());
                 if (StrUtil.isNotBlank(pointsBefore)) {
                     System.out.println("[永洪] 任务前洪豆：" + pointsBefore);
@@ -196,7 +224,9 @@ public class YongHoneCheckInTask extends CheckInTask {
                 // 论坛积分规则：发表主题和发表回复每天各只奖励一次（+5、+2），
                 // 多发帖和多条评论不再增加洪豆，只增加风控风险，所以每天只发一篇签到帖和一条评论。
                 publishUnlessPosted(browser, postedToday, "签到", "签到", "签到", 1);
-                addPointsMessage(cj, pointsBefore, pointsSlot);
+                // 当天首次登录时以登录前余额为基准，这样本次获得会包含每天登录奖励；否则以任务前余额为基准
+                String pointsBaseline = pointsBeforeLogin != null ? pointsBeforeLogin : pointsBefore;
+                addPointsMessage(cj, pointsBefore, pointsBaseline, pointsSlot);
                 success = true;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -234,9 +264,10 @@ public class YongHoneCheckInTask extends CheckInTask {
     /**
      * 读取任务全部完成后的洪豆数量，插入到用户名之后；取不到时退回任务前的值并说明原因。
      *
+     * @param pointsBaseline 计算本次获得洪豆的基准值
      * @param slot 用户名之后的位置，任务全部完成后才知道最终值，所以先占位再回填
      */
-    private void addPointsMessage(Page cj, String pointsBefore, int slot) {
+    private void addPointsMessage(Page cj, String pointsBefore, String pointsBaseline, int slot) {
         String pointsAfter = null;
         try {
             cj.reload();
@@ -257,7 +288,7 @@ public class YongHoneCheckInTask extends CheckInTask {
         }
         System.out.println("[永洪] 任务后洪豆：" + pointsAfter);
         insertMessage(slot, new MessageBlock().addLine("洪豆：", pointsAfter));
-        Long increase = pointsIncrease(pointsBefore, pointsAfter);
+        Long increase = pointsIncrease(pointsBaseline, pointsAfter);
         if (increase != null && increase > 0) {
             System.out.println("[永洪] 本次获得洪豆：" + increase);
             addMessage("本次获得洪豆：", String.valueOf(increase));
@@ -299,6 +330,63 @@ public class YongHoneCheckInTask extends CheckInTask {
             return Long.parseLong(value.trim());
         } catch (NumberFormatException e) {
             return null;
+        }
+    }
+
+    private static String setCookieHeader(Response response) {
+        try {
+            List<String> values = new ArrayList<>();
+            for (HeaderEntry header : response.headers()) {
+                if ("set-cookie".equalsIgnoreCase(header.getName()) && header.getValue() != null) {
+                    values.add(header.getValue());
+                }
+            }
+            return String.join("\n", values);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 从单个响应的 Set-Cookie 中解析每天登录奖励前的洪豆。
+     * 论坛只在当天首次登录时下发 creditrule=每天登录 和 creditbase（奖励前各项积分），其他情况返回 null。
+     */
+    static String loginPointsBase(String setCookieHeader) {
+        if (StrUtil.isBlank(setCookieHeader)) {
+            return null;
+        }
+        String rule = null;
+        String base = null;
+        for (String line : setCookieHeader.split("\n")) {
+            String pair = line.split(";", 2)[0].trim();
+            int eq = pair.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String name = pair.substring(0, eq);
+            String value = urlDecode(pair.substring(eq + 1));
+            if (name.endsWith("_creditrule")) {
+                rule = value;
+            } else if (name.endsWith("_creditbase")) {
+                base = value;
+            }
+        }
+        if (!DAILY_LOGIN_RULE.equals(rule) || base == null) {
+            return null;
+        }
+        String[] credits = base.split("D");
+        if (credits.length <= POINTS_CREDIT_INDEX) {
+            return null;
+        }
+        String points = credits[POINTS_CREDIT_INDEX].trim();
+        return parsePoints(points) == null ? null : points;
+    }
+
+    private static String urlDecode(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return value;
         }
     }
 

@@ -101,4 +101,29 @@ public class YongHoneCheckInTaskTest {
         assertNull(YongHoneCheckInTask.pointsIncrease("75594", ""));
         assertNull(YongHoneCheckInTask.pointsIncrease("abc", "75601"));
     }
+
+    @Test
+    public void parsesPointsBeforeDailyLoginReward() {
+        String header = "OPK6_a963_creditnotice=0D0D10D0D20D0D0D0D0D81273; path=/; domain=yonghongtech.com; secure\n"
+                + "OPK6_a963_creditbase=0D0D859D0D719D0D0D0D0; path=/; domain=yonghongtech.com; secure\n"
+                + "OPK6_a963_creditrule=%E6%AF%8F%E5%A4%A9%E7%99%BB%E5%BD%95; path=/; domain=yonghongtech.com; secure";
+
+        assertEquals("859", YongHoneCheckInTask.loginPointsBase(header));
+    }
+
+    @Test
+    public void ignoresCreditCookiesFromOtherRulesOrIncompleteHeaders() {
+        String otherRule = "OPK6_a963_creditbase=0D0D859D0D719D0D0D0D0; path=/\n"
+                + "OPK6_a963_creditrule=%E5%8F%91%E8%A1%A8%E4%B8%BB%E9%A2%98; path=/";
+        String missingBase = "OPK6_a963_creditrule=%E6%AF%8F%E5%A4%A9%E7%99%BB%E5%BD%95; path=/";
+        String brokenBase = "OPK6_a963_creditbase=0D0; path=/\n"
+                + "OPK6_a963_creditrule=%E6%AF%8F%E5%A4%A9%E7%99%BB%E5%BD%95; path=/";
+
+        assertNull(YongHoneCheckInTask.loginPointsBase(otherRule));
+        assertNull(YongHoneCheckInTask.loginPointsBase(missingBase));
+        assertNull(YongHoneCheckInTask.loginPointsBase(brokenBase));
+        assertNull(YongHoneCheckInTask.loginPointsBase("OPK6_a963_sid=abc; path=/"));
+        assertNull(YongHoneCheckInTask.loginPointsBase(""));
+        assertNull(YongHoneCheckInTask.loginPointsBase(null));
+    }
 }
