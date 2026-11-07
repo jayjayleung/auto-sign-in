@@ -5,9 +5,17 @@ cd "$(dirname "$0")"
 if [ -f .env ]; then
   set -a
   # 加载 .env：过滤空行和 # 开头的注释，然后导出
+  # 值两端的成对引号会被剥掉，和 Compose / entrypoint.sh 的行为保持一致
   while IFS= read -r line || [ -n "$line" ]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    export "$line"
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    export "$key=$value"
   done < .env
   set +a
 fi

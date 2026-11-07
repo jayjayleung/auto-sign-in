@@ -2,13 +2,21 @@
 set -e
 
 # Compose 会把 env 文件里的 $ 当成变量替换。挂载的原始文件按字面值覆盖，保留 Cookie 中的 $。
+# 值可用单引号包裹（.env 里 TIDB_COOKIE 就是这样，避免 Compose 插值告警），这里统一剥掉成对引号。
 if [ -f /app/config.env ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
       continue
     fi
     line="${line#export }"
-    export "$line"
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    export "$key=$value"
   done < /app/config.env
 fi
 
