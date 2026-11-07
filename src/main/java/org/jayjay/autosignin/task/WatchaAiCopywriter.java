@@ -35,15 +35,28 @@ class WatchaAiCopywriter {
             "often", "across", "around", "another"));
     private static final String[] BANNED = {
             "亲测", "实测", "用过", "用了一段时间", "用了几个月", "用了三个月",
-            "我用下来", "体验下来", "赋能", "闭环", "一站式", "数据提升"
+            "我用下来", "体验下来", "赋能", "闭环", "一站式", "数据提升",
+            "总的来说", "总而言之", "值得一提的是", "无论是", "综上",
+            "首先", "其次", "在当今", "随着"
     };
+    /** 把自己写成「只读了页面」的说法，读起来就不像在谈产品本身。 */
+    private static final Pattern META = Pattern.compile(
+            "(?:介绍|简介|描述|文案|材料|页面|详情|宣传|说明)[里中上]"
+                    + "|(?:介绍|简介|描述|文案|材料|页面|详情)(?:写到|写着|提到|说)"
+                    + "|(?:号称|宣传说|据称|说是|主打|标榜)");
+    /** 声称过去已经发生过的使用行为，属于编造经历。 */
+    private static final Pattern PAST_USE = Pattern.compile(
+            "(?:上周|上个月|去年|昨天|前天|前几天|前两天|这两天|上次|之前用|已经用|用了|试了|试过"
+                    + "|跑了一遍|测了)");
     private static final String[] REVIEW_SHAPES = {
-            "第一段像跟同事安利或者劝退：用自己的话说它替人省了哪一步，或者卡在哪；第二段顺口带一个你自己还没弄明白的地方。",
-            "第一段像自言自语：它能接走哪件事；第二段说你担心它接不了哪件事。",
-            "第一段从身边哪种人会关心它说起；第二段说你打算拿什么例子去试它，或者为什么懒得试。"
+            "先说你在什么场合会想起它，具体到一件事；再说一处你自己还没把握、想找个例子验证的地方。",
+            "先说它该替你省掉哪一步，把这一步讲具体；再说它可能接不住的那种情形。",
+            "先说哪类人会被它打动，落到一个人；再说你自己最不放心的一点。",
+            "先说它最实在的那个能力给你什么判断；再说你觉得它容易被高估或被用歪的地方。",
+            "先说你现在的做法和换成它之间的取舍；再说你打算怎么判断值不值。"
     };
     private static final String[] POST_ANGLES = {
-            "只抛一个介绍里没讲清的问题，像在评论区问人",
+            "只抛一个它没讲清的问题，像在评论区问人",
             "只聊聊它适合谁，说说你想到的某一种人",
             "只提一个用之前想先弄明白的口径"
     };
@@ -64,7 +77,7 @@ class WatchaAiCopywriter {
 
     DraftResult writeReview(String name, String slogan, String categories, String description, int productId) {
         String text = limit(description);
-        List<String> anchors = findAnchors(text);
+        List<String> anchors = anchorsFor(name, text);
         if (anchors.size() < 2) {
             return DraftResult.failed("推荐产品介绍太短");
         }
@@ -73,16 +86,19 @@ class WatchaAiCopywriter {
                 + productBrief(name, slogan, categories, text, anchors)
                 + "写法：" + REVIEW_SHAPES[shape] + "\n"
                 + "返回 {\"paragraphs\":[\"第一段\",\"第二段\"],\"vote\":\"GOOD 或 BAD\"}\n"
-                + "两段合计 120 到 220 个字，读起来像随口说的。里面至少一处要照抄「可引用材料」里的一个短词，"
-                + "比如产品名、面向人群或某个功能名，但不要整句搬介绍原话。\n"
-                + "vote 是你自己看完介绍的真实态度：觉得想找机会试试就 GOOD，觉得不打算用或没被说服就 BAD。"
+                + "两段合计 120 到 220 个字，读起来像随口说的。正文里至少一处自然地带出产品名或某个功能名。\n"
+                + "写你自己的场景和判断，不要复述参数：分辨率、时长、价格、额度这类数字别抄进正文，"
+                + "需要提到就说它给你什么感觉。\n"
+                + "整篇不要出现「介绍」「简介」「页面」「文案」「材料」「主打」「号称」「说是」这些词，"
+                + "也不要写「还没写清」这种交代出处的句子，就当这些认识是你自己的判断。\n"
+                + "vote 是你自己的态度：觉得想找机会试试就 GOOD，觉得不打算用或没被说服就 BAD。"
                 + "vote 要和正文的语气一致，正文说想试就别投 BAD。";
         return generate(user, true, text, anchors);
     }
 
     DraftResult writePost(String name, String slogan, String categories, String description, int publishedCount) {
         String text = limit(description);
-        List<String> anchors = findAnchors(text);
+        List<String> anchors = anchorsFor(name, text);
         if (anchors.size() < 2) {
             return DraftResult.failed("推荐产品介绍太短");
         }
@@ -92,16 +108,19 @@ class WatchaAiCopywriter {
                 + "角度：" + POST_ANGLES[angle] + "\n"
                 + "返回 {\"title\":\"标题\",\"paragraphs\":[\"正文\"]}\n"
                 + "标题不超过 20 个汉字。正文 60 到 160 个字，写成三到五句，不要写成测评正文。\n"
-                + "正文里至少一处照抄「可引用材料」里的原词，比如直接把产品名、面向人群或某个功能名写进去。";
+                + "正文里至少一处自然地带出产品名或某个功能名。不要复述参数和数字，"
+                + "也不要出现「介绍」「简介」「页面」「主打」「号称」「说是」这些词。";
         return generate(user, false, text, anchors);
     }
 
     private DraftResult generate(String user, boolean review, String source, List<String> anchors) {
-        String system = "你是观猹社区里的一个普通用户，正在用第一人称跟人聊天，不是在做测评、写文案或汇报。\n"
-                + "语气像平时发帖：说话短、有转折、可以有点犹豫和小情绪，用「我」「你」这种口吻，避免排比句、分点、总结句和广告腔。\n"
-                + "只根据给出的产品介绍写，不编造使用时长、个人经历、测试数据和他人评价。\n"
-                + "不要使用这些说法：亲测、实测、用过、用了一段时间、用了几个月、用了三个月、我用下来、体验下来、赋能、闭环、一站式、数据提升。\n"
-                + "可以写自己看到它时在想什么、打算去核实什么，不要说成已经上手。\n"
+        String system = "你是观猹社区里的一个普通用户，在用自己的话讲对一个产品的判断，不是在做测评、写文案或汇报。\n"
+                + "语气像平时发帖：句子短，有转折，可以有点犹豫和小情绪，用「我」「你」这种口吻，避免排比句、分点、总结句和广告腔。\n"
+                + "写具体的场景和具体的取舍：说清它会用在哪件事上、替代掉你现在的哪一步、哪类人会觉得值。\n"
+                + "不要写成对材料的转述：不要把「介绍」「简介」「页面」「文案」「主打」「号称」这类词写进正文，也不要写「材料里提到」这种话。\n"
+                + "不要编造已经发生过的使用经历：不能写「上周给客户做短片」「我试了三天」「用了两天发现」这类过去发生的事，"
+                + "也不能编造测试数据、他人评价和具体数字。要说自己，就说打算怎么用、准备拿什么例子验证。\n"
+                + "不要使用这些说法：亲测、实测、用过、用了一段时间、用了几个月、我用下来、体验下来、赋能、闭环、一站式、数据提升。\n"
                 + "只返回 JSON，不要使用 Markdown。";
         String feedback = null;
         String lastFailure = "返回内容无法读取";
@@ -164,6 +183,12 @@ class WatchaAiCopywriter {
         if (banned != null) {
             return banned;
         }
+        if (META.matcher(joined).find()) {
+            return "正文里交代了出处";
+        }
+        if (PAST_USE.matcher(joined).find()) {
+            return "写了没有发生过的使用经历";
+        }
         if (copiesSource(source, joined)) {
             return "复制了介绍原句";
         }
@@ -194,6 +219,12 @@ class WatchaAiCopywriter {
         if (banned != null) {
             return banned;
         }
+        if (META.matcher(body).find()) {
+            return "正文里交代了出处";
+        }
+        if (PAST_USE.matcher(body).find()) {
+            return "写了没有发生过的使用经历";
+        }
         if (copiesSource(source, joined)) {
             return "复制了介绍原句";
         }
@@ -205,6 +236,21 @@ class WatchaAiCopywriter {
             return "篇幅不合适";
         }
         return null;
+    }
+
+    /**
+     * 可引用材料。产品名本身就是最容易自然出现的词，先放进去；
+     * 正文里提到产品名也算带上了材料，不该因为介绍里没重复产品名而判失败。
+     */
+    static List<String> anchorsFor(String name, String text) {
+        LinkedHashSet<String> anchors = new LinkedHashSet<String>();
+        String product = StrUtil.trimToEmpty(name);
+        if (product.length() >= 2 && product.length() <= 18) {
+            anchors.add(product);
+        }
+        anchors.addAll(findAnchors(text));
+        List<String> result = new ArrayList<String>(anchors);
+        return result.size() > 8 ? new ArrayList<String>(result.subList(0, 8)) : result;
     }
 
     static List<String> findAnchors(String text) {

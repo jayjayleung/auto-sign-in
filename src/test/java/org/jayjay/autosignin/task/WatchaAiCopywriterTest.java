@@ -15,9 +15,8 @@ import static org.junit.Assert.assertTrue;
 public class WatchaAiCopywriterTest {
 
     private static final String PRODUCT_7 = "面向科研人员。提供深度检索，还没写清推荐依据。";
-    private static final String REVIEW_P1 = "这款工具面向科研人员，介绍里把深度检索写成主要能力。它想把筛选收成一件具体的事，先看和题目有关的结果，再决定要不要继续。";
-    private static final String REVIEW_P2 = "我会先核实推荐是怎么来的。介绍里写到还没写清推荐依据，所以正式拿来查资料之前，我会用一个自己熟悉的题目看结果还在不在点上。";
-
+    private static final String REVIEW_P1 = "我查资料最烦的是翻到第五页才发现全是同义词凑出来的结果，这款工具面向科研人员，把深度检索单独拎出来做，我猜它是想把这一层筛掉。";
+    private static final String REVIEW_P2 = "让我犹豫的是推荐依据，为什么给你这几条，我还没看到能说服自己的说法。真拿它查资料前，我会先挑一个自己熟的题目，看结果还在不在点上。";
     @Test
     public void buildsChatEndpoint() {
         assertEquals("http://127.0.0.1/v1/chat/completions", AiClient.chatEndpoint("http://127.0.0.1/v1/"));
@@ -70,6 +69,27 @@ public class WatchaAiCopywriterTest {
         String source = "这是一段用于复制检测的产品介绍文本内容补充";
         assertEquals("复制了介绍原句", WatchaAiCopywriter.rejectReview(
                 Arrays.asList(source.substring(0, 20) + "尾巴", "第二段"), source, Arrays.asList("复制检测")));
+    }
+
+    @Test
+    public void rejectsFakeExperience() {
+        List<String> anchors = WatchaAiCopywriter.findAnchors(PRODUCT_7);
+
+        assertEquals("写了没有发生过的使用经历", WatchaAiCopywriter.rejectReview(
+                Arrays.asList("上周给客户做短片时我就在等这种工具。这款工具面向科研人员，深度检索能省一步。", REVIEW_P2),
+                PRODUCT_7, anchors));
+        assertEquals("写了没有发生过的使用经历", WatchaAiCopywriter.rejectReview(
+                Arrays.asList(REVIEW_P1, "我试了三天，深度检索确实快，推荐依据也说得过去，值得一试的人可以入手。"),
+                PRODUCT_7, anchors));
+    }
+
+    @Test
+    public void rejectsSourceTalk() {
+        List<String> anchors = WatchaAiCopywriter.findAnchors(PRODUCT_7);
+
+        assertEquals("正文里交代了出处", WatchaAiCopywriter.rejectReview(
+                Arrays.asList("这款工具介绍里把深度检索写成主要能力。" + REVIEW_P1, REVIEW_P2),
+                PRODUCT_7, anchors));
     }
 
     @Test

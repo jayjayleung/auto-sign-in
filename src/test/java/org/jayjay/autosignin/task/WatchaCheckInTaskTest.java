@@ -289,8 +289,8 @@ public class WatchaCheckInTaskTest {
         assertTrue(aiBodies.get(0).contains("\"model\":\"test-model\""));
         assertTrue(aiBodies.get(0).contains("体裁：猹评"));
         assertTrue(aiBodies.get(1).contains("体裁：帖子"));
-        assertTrue(aiBodies.get(1).contains("只抛一个介绍里没讲清的问题"));
-        assertTrue(aiBodies.get(0).contains("第一人称"));
+        assertTrue(aiBodies.get(1).contains("只抛一个它没讲清的问题"));
+        assertTrue(aiBodies.get(0).contains("不要写成对材料的转述"));
         assertFalse(aiBodies.toString().contains("secret-password"));
         assertFalse(aiBodies.toString().contains("login-token"));
         JSONObject review = JSONUtil.parseObj(reviewBody.get());
@@ -491,11 +491,11 @@ public class WatchaCheckInTaskTest {
 
     private static final String PRODUCT_7 = "面向科研人员。提供深度检索，还没写清推荐依据。";
     private static final String PRODUCT_8 = "面向排盘学习者。重点是时间规则，没有写明起算日期。";
-    private static final String REVIEW_P1 = "这款工具面向科研人员，介绍里把深度检索写成主要能力。它想把筛选收成一件具体的事，先看和题目有关的结果，再决定要不要继续。";
-    private static final String REVIEW_P2 = "我会先核实推荐是怎么来的。介绍里写到还没写清推荐依据，所以正式拿来查资料之前，我会用一个自己熟悉的题目看结果还在不在点上。";
+    private static final String REVIEW_P1 = "我查资料最烦的是翻到第五页才发现全是同义词凑出来的结果，这款工具面向科研人员，把深度检索单独拎出来做，我猜它是想把这一层筛掉。";
+    private static final String REVIEW_P2 = "让我犹豫的是推荐依据，为什么给你这几条，我还没看到能说服自己的说法。真拿它查资料前，我会先挑一个自己熟的题目，看结果还在不在点上。";
     private static final String POST_TITLE = "时间规则从哪一天起算";
-    private static final String POST_BODY = "介绍把适用的人写成面向排盘学习者。起算这件事没有写明起算日期，我会先拿一个自己会排的例子对一下口径，再决定要不要继续看。";
-    private static final String POST_FOR_PRODUCT_7 = "这款工具面向科研人员，介绍里写到还没写清推荐依据。正式使用前我会先看推荐是怎么来的，再决定要不要继续。";
+    private static final String POST_BODY = "这类排盘工具面向排盘学习者，起算日期是我最先要问清的一件事。我会先拿一个自己会排的例子对一下口径，再决定要不要继续看。";
+    private static final String POST_FOR_PRODUCT_7 = "这款工具面向科研人员，推荐依据是我最先要问清的一件事。正式用之前我会先看它给的理由站不站得住，再决定要不要继续。";
 
     private WatchaCheckInTask task(Map<String, String> environment) {
         return new WatchaCheckInTask(environment, baseUrl);
