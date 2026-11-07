@@ -72,14 +72,15 @@ public class WatchaAiCopywriterTest {
     }
 
     @Test
-    public void rejectsFakeExperience() {
+    public void acceptsExperienceTone() {
         List<String> anchors = WatchaAiCopywriter.findAnchors(PRODUCT_7);
 
-        assertEquals("写了没有发生过的使用经历", WatchaAiCopywriter.rejectReview(
-                Arrays.asList("上周给客户做短片时我就在等这种工具。这款工具面向科研人员，深度检索能省一步。", REVIEW_P2),
+        assertNull(WatchaAiCopywriter.rejectReview(Arrays.asList(
+                "我试了切问的深度检索，拿一个自己熟悉的问题核对结果。这类工具面向科研人员，我最在意的是结果能不能让我少绕弯；这一轮看下来，相关内容的范围更好判断了，也不用一边换词一边重新理清问题。",
+                "我用下来还是会回头核对推荐依据，不会把结论直接搬走。能顺着问题继续查就留着用，碰到陌生领域则多核一遍。"),
                 PRODUCT_7, anchors));
-        assertEquals("写了没有发生过的使用经历", WatchaAiCopywriter.rejectReview(
-                Arrays.asList(REVIEW_P1, "我试了三天，深度检索确实快，推荐依据也说得过去，值得一试的人可以入手。"),
+        assertNull(WatchaAiCopywriter.rejectPost("用过深度检索后的一点感受", Arrays.asList(
+                "我用过这款面向科研人员的工具，试了拿同一个问题换个问法继续检索。相关内容找起来顺了一些，不过我用下来还是会核对推荐依据，不能只看结论。"),
                 PRODUCT_7, anchors));
     }
 

@@ -7,7 +7,9 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 兼容 OpenAI 对话接口。未指定平台时读取 AI_BASE_URL、AI_API_KEY、AI_MODEL。
@@ -46,27 +48,7 @@ public class AiClient {
                 .set("temperature", 0.8)
                 .set("max_tokens", 3000)
                 .set("messages", messages);
-        HttpResponse response;
-        try {
-            response = HttpRequest.post(chatEndpoint(baseUrl))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json;charset=UTF-8")
-                    .header("Accept", "application/json")
-                    .body(payload.toString())
-                    .timeout(TIMEOUT)
-                    .execute();
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("文案生成失败：" + briefMessage(e), e);
-        }
-        String body = response.body();
-        int status = response.getStatus();
-        if (status < 200 || status >= 300) {
-            throw new IllegalStateException(errorMessage(body));
-        }
-        JSONObject json = parseJson(body);
-        if (json == null) {
-            throw new IllegalStateException("文案生成失败：服务返回了无效数据");
-        }
+        JSONObject json = request(chatEndpoint(baseUrl), payload);
         JSONArray choices = json.getJSONArray("choices");
         if (choices == null || choices.isEmpty()) {
             throw new IllegalStateException("文案生成失败：服务没有返回文案");
@@ -82,15 +64,136 @@ public class AiClient {
         return message.getStr("content");
     }
 
+    /** 通过 Responses 的原生搜索工具查资料，必须有真实搜索调用和来源才算成功。 */
+    public String search(String system, String user) {
+        JSONObject payload = JSONUtil.createObj()
+                .set("model", model)
+                .set("instructions", system)
+                .set("input", user)
+                .set("tools", JSONUtil.createArray().put(JSONUtil.createObj().set("type", "web_search")))
+                .set("tool_choice", "required")
+                .set("include", JSONUtil.createArray().put("web_search_call.action.sources"))
+                .set("max_output_tokens", 3000);
+        JSONObject json = request(responsesEndpoint(baseUrl), payload);
+        if (!"completed".equals(json.getStr("status"))) {
+            throw new IllegalStateException("文案生成失败：联网搜索未完成");
+        }
+        JSONArray output = json.getJSONArray("output");
+        boolean searched = false;
+        StringBuilder text = new StringBuilder();
+        Set<String> sources = new LinkedHashSet<String>();
+        if (output != null) {
+            for (int index = 0; index < output.size(); index++) {
+                JSONObject item = output.getJSONObject(index);
+                if (item == null) {
+                    continue;
+                }
+                if ("web_search_call".equals(item.getStr("type"))
+                        && "completed".equals(item.getStr("status"))) {
+                    searched = true;
+                    JSONObject action = item.getJSONObject("action");
+                    if (action != null) {
+                        addSource(sources, action.getStr("url"));
+                        JSONArray links = action.getJSONArray("sources");
+                        if (links != null) {
+                            for (int link = 0; link < links.size(); link++) {
+                                JSONObject source = links.getJSONObject(link);
+                                if (source != null) {
+                                    addSource(sources, source.getStr("url"));
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!"message".equals(item.getStr("type"))) {
+                    continue;
+                }
+                JSONArray content = item.getJSONArray("content");
+                if (content == null) {
+                    continue;
+                }
+                for (int part = 0; part < content.size(); part++) {
+                    JSONObject block = content.getJSONObject(part);
+                    if (block == null || !"output_text".equals(block.getStr("type"))) {
+                        continue;
+                    }
+                    String value = block.getStr("text");
+                    if (StrUtil.isNotBlank(value)) {
+                        text.append(value).append('\n');
+                    }
+                    JSONArray annotations = block.getJSONArray("annotations");
+                    if (annotations != null) {
+                        for (int annotation = 0; annotation < annotations.size(); annotation++) {
+                            JSONObject citation = annotations.getJSONObject(annotation);
+                            if (citation != null && "url_citation".equals(citation.getStr("type"))) {
+                                addSource(sources, citation.getStr("url"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (!searched) {
+            throw new IllegalStateException("文案生成失败：服务未执行联网搜索");
+        }
+        if (text.length() == 0 || sources.isEmpty()) {
+            throw new IllegalStateException("文案生成失败：联网搜索没有返回产品资料或来源");
+        }
+        String summary = text.length() > 4000 ? text.substring(0, 4000) : text.toString();
+        return summary.trim() + "\n检索来源：\n" + String.join("\n", sources);
+    }
+
     public static String chatEndpoint(String baseUrl) {
+        return apiBase(baseUrl) + "/chat/completions";
+    }
+
+    public static String responsesEndpoint(String baseUrl) {
+        return apiBase(baseUrl) + "/responses";
+    }
+
+    private static String apiBase(String baseUrl) {
         String value = baseUrl == null ? "" : baseUrl.trim();
         while (value.endsWith("/")) {
             value = value.substring(0, value.length() - 1);
         }
-        if (value.endsWith("/chat/completions")) {
-            return value;
+        for (String suffix : new String[]{"/chat/completions", "/responses"}) {
+            if (value.endsWith(suffix)) {
+                return value.substring(0, value.length() - suffix.length());
+            }
         }
-        return value + "/chat/completions";
+        return value;
+    }
+
+    private JSONObject request(String endpoint, JSONObject payload) {
+        String body;
+        int status;
+        try (HttpResponse response = HttpRequest.post(endpoint)
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json;charset=UTF-8")
+                .header("Accept", "application/json")
+                .body(payload.toString())
+                .timeout(TIMEOUT)
+                .execute()) {
+            body = response.body();
+            status = response.getStatus();
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("文案生成失败：" + briefMessage(e), e);
+        }
+        if (status < 200 || status >= 300) {
+            throw new IllegalStateException(errorMessage(body));
+        }
+        JSONObject json = parseJson(body);
+        if (json == null) {
+            throw new IllegalStateException("文案生成失败：服务返回了无效数据");
+        }
+        return json;
+    }
+
+    private static void addSource(Set<String> sources, String url) {
+        if (sources.size() < 6 && StrUtil.isNotBlank(url) && url.length() <= 1000
+                && (url.startsWith("https://") || url.startsWith("http://"))) {
+            sources.add(url);
+        }
     }
 
     private static String errorMessage(String body) {

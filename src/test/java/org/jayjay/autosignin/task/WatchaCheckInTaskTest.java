@@ -58,6 +58,8 @@ public class WatchaCheckInTaskTest {
     private int[] productIds = new int[]{7, 8};
     private final AtomicInteger pauses = new AtomicInteger();
     private final AtomicInteger aiRequests = new AtomicInteger();
+    private final AtomicInteger searchRequests = new AtomicInteger();
+    private volatile boolean searchFails;
     private final AtomicInteger questFetches = new AtomicInteger();
     private final AtomicInteger reviewRequests = new AtomicInteger();
     private final AtomicInteger discussRequests = new AtomicInteger();
@@ -96,6 +98,8 @@ public class WatchaCheckInTaskTest {
         productIds = new int[]{7, 8};
         pauses.set(0);
         aiRequests.set(0);
+        searchRequests.set(0);
+        searchFails = false;
         questFetches.set(0);
         reviewRequests.set(0);
         discussRequests.set(0);
@@ -282,6 +286,7 @@ public class WatchaCheckInTaskTest {
 
         assertEquals(2, pauses.get());
         assertEquals(2, aiRequests.get());
+        assertEquals(2, searchRequests.get());
         assertEquals(1, reviewRequests.get());
         assertEquals(1, discussRequests.get());
         assertEquals("Bearer ai-test-key", aiAuthorization.get());
@@ -289,7 +294,8 @@ public class WatchaCheckInTaskTest {
         assertTrue(aiBodies.get(0).contains("\"model\":\"test-model\""));
         assertTrue(aiBodies.get(0).contains("体裁：猹评"));
         assertTrue(aiBodies.get(1).contains("体裁：帖子"));
-        assertTrue(aiBodies.get(1).contains("只抛一个它没讲清的问题"));
+        assertTrue(aiBodies.get(0).contains("官网资料补充"));
+        assertTrue(aiBodies.get(1).contains("官网资料补充"));
         assertTrue(aiBodies.get(0).contains("不要写成对材料的转述"));
         assertFalse(aiBodies.toString().contains("secret-password"));
         assertFalse(aiBodies.toString().contains("login-token"));
@@ -425,6 +431,7 @@ public class WatchaCheckInTaskTest {
 
         assertEquals(2, pauses.get());
         assertEquals(3, aiRequests.get());
+        assertEquals(1, searchRequests.get());
         assertEquals(0, reviewRequests.get());
         assertEquals(1, discussRequests.get());
         assertEquals(Integer.valueOf(7), JSONUtil.parseObj(discussBody.get()).getInt("product_id"));
@@ -447,6 +454,21 @@ public class WatchaCheckInTaskTest {
         assertTrue(quest.contains("busy"));
         assertTrue(quest.contains("本周帖子：已跳过"));
         assertTrue(quest.contains("文案接口不可用"));
+    }
+
+    @Test
+    public void skipsPublishingWhenProductSearchFails() {
+        searchFails = true;
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals(1, checkInRequests.get());
+        assertEquals(1, searchRequests.get());
+        assertEquals(0, aiRequests.get());
+        assertEquals(0, reviewRequests.get());
+        assertEquals(0, discussRequests.get());
+        assertTrue(task.getMessageBlocks().get(1).toString().contains("search unavailable"));
     }
 
     @Test
@@ -491,11 +513,11 @@ public class WatchaCheckInTaskTest {
 
     private static final String PRODUCT_7 = "面向科研人员。提供深度检索，还没写清推荐依据。";
     private static final String PRODUCT_8 = "面向排盘学习者。重点是时间规则，没有写明起算日期。";
-    private static final String REVIEW_P1 = "我查资料最烦的是翻到第五页才发现全是同义词凑出来的结果，这款工具面向科研人员，把深度检索单独拎出来做，我猜它是想把这一层筛掉。";
-    private static final String REVIEW_P2 = "让我犹豫的是推荐依据，为什么给你这几条，我还没看到能说服自己的说法。真拿它查资料前，我会先挑一个自己熟的题目，看结果还在不在点上。";
+    private static final String REVIEW_P1 = "我拿一个熟悉的问题试了切问的深度检索，先看结果是不是围绕同一件事，再逐条核对相关内容。这类工具面向科研人员，我更在意这一轮能不能帮我缩小范围，至少找资料的思路顺了一些。";
+    private static final String REVIEW_P2 = "我用下来还是会回头核对推荐依据，不会直接把结论搬走。碰到不熟悉的话题，关键内容总要再查一遍。能顺着问题继续找资料，我才愿意把它留在自己的工作流程里。";
     private static final String POST_TITLE = "时间规则从哪一天起算";
-    private static final String POST_BODY = "这类排盘工具面向排盘学习者，起算日期是我最先要问清的一件事。我会先拿一个自己会排的例子对一下口径，再决定要不要继续看。";
-    private static final String POST_FOR_PRODUCT_7 = "这款工具面向科研人员，推荐依据是我最先要问清的一件事。正式用之前我会先看它给的理由站不站得住，再决定要不要继续。";
+    private static final String POST_BODY = "我试了这款面向排盘学习者的工具，拿自己会排的例子对了一下时间规则。排盘时我最在意的还是起算日期，口径对不上，后面的结果就得重新核。大家碰到这种情况怎么处理？";
+    private static final String POST_FOR_PRODUCT_7 = "我用过这款面向科研人员的工具，试了拿同一个问题换个问法继续检索。相关内容找起来顺了一些，不过我用下来还是会核对推荐依据，不能只看结论。";
 
     private WatchaCheckInTask task(Map<String, String> environment) {
         return new WatchaCheckInTask(environment, baseUrl);
@@ -535,6 +557,7 @@ public class WatchaCheckInTaskTest {
         server.createContext("/api/v2/products/", this::handleProduct);
         server.createContext("/api/v2/discuss/posts", this::handleDiscuss);
         server.createContext("/v1/chat/completions", this::handleAi);
+        server.createContext("/v1/responses", this::handleSearch);
         server.createContext("/api/v2/users/10174946/posts", this::handleUserPosts);
     }
 
@@ -720,6 +743,25 @@ public class WatchaCheckInTaskTest {
         JSONObject message = JSONUtil.createObj().set("content", content.toString());
         JSONArray choices = JSONUtil.createArray().put(JSONUtil.createObj().set("message", message));
         json(exchange, 200, JSONUtil.createObj().set("choices", choices).toString());
+    }
+
+    private void handleSearch(HttpExchange exchange) throws IOException {
+        readBody(exchange);
+        searchRequests.incrementAndGet();
+        if (searchFails) {
+            json(exchange, 503, "{\"error\":{\"message\":\"search unavailable\"}}");
+            return;
+        }
+        JSONObject source = JSONUtil.createObj().set("type", "url").set("url", "https://example.com/product");
+        JSONObject search = JSONUtil.createObj()
+                .set("type", "web_search_call")
+                .set("status", "completed")
+                .set("action", JSONUtil.createObj().set("sources", JSONUtil.createArray().put(source)));
+        JSONObject text = JSONUtil.createObj().set("type", "output_text").set("text", "官网资料补充：可对任务结果进一步核对。");
+        JSONObject message = JSONUtil.createObj().set("type", "message")
+                .set("content", JSONUtil.createArray().put(text));
+        json(exchange, 200, JSONUtil.createObj().set("status", "completed")
+                .set("output", JSONUtil.createArray().put(search).put(message)).toString());
     }
 
     private String questPayload() {
