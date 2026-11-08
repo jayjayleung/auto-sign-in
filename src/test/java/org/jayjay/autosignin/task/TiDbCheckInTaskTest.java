@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import cn.hutool.core.util.ArrayUtil;
 import cn.hutool.http.HttpRequest;
+import org.jayjay.autosignin.entity.MessageBlock;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -13,6 +14,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,12 +31,16 @@ public class TiDbCheckInTaskTest {
     private final AtomicInteger loginRequests = new AtomicInteger();
     private final AtomicReference<String> checkInCookie = new AtomicReference<>();
     private final AtomicReference<String> checkInCsrf = new AtomicReference<>();
+    private volatile boolean sessionExpired;
+    private volatile boolean wafBlocked;
 
     @Before
     public void setUp() throws IOException {
         loginRequests.set(0);
         checkInCookie.set(null);
         checkInCsrf.set(null);
+        sessionExpired = false;
+        wafBlocked = false;
         // hutool 的 Cookie 仓库按主机共享且忽略端口，不清空会让相邻测试的 Cookie 串进来
         HttpRequest.getCookieManager().getCookieStore().removeAll();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -131,6 +137,54 @@ public class TiDbCheckInTaskTest {
     }
 
     @Test
+    public void reportsExpiredCookieWithActionableMessage() {
+        sessionExpired = true;
+        Map<String, String> environment = new HashMap<>();
+        environment.put("TIDB_LOGIN_MODE", "cookie");
+        environment.put("TIDB_COOKIE", "csrftoken=cookie-csrf; ssid=cookie-ssid; uid=cookie-uid");
+
+        TiDbCheckInTask task = task(environment);
+        task.run();
+
+        List<MessageBlock> blocks = task.getMessageBlocks();
+        String message = blocks.get(blocks.size() - 1).toString();
+        assertEquals("签到失败：Cookie 已失效\n"
+                + "原因：服务端返回未提供登录凭证，说明 cookie 里的会话已被清除。\n"
+                + "处理：浏览器重新登录 pingkai.cn 抓取 Cookie，覆盖 TIDB_COOKIE\n"
+                + "要求：必须包含 csrftoken、ssid、uid 三项，之后重启容器", message);
+        assertFalse("会话失效提示不应直接暴露服务端英文错误",
+                task.buildNotificationSection().toString().contains(TiDbCheckInTask.AUTH_FAILED_DETAIL));
+    }
+
+    @Test
+    public void reportsPasswordModeAuthFailureSeparately() {
+        sessionExpired = true;
+        Map<String, String> environment = new HashMap<>();
+        environment.put("TIDB_USERNAME", "user@example.com");
+        environment.put("TIDB_PASSWORD", "secret-password");
+
+        TiDbCheckInTask task = task(environment);
+        task.run();
+
+        List<MessageBlock> blocks = task.getMessageBlocks();
+        assertTrue(blocks.get(blocks.size() - 1).toString().startsWith("签到失败：登录凭证无效"));
+    }
+
+    @Test
+    public void reportsWafBlockedCookieAsSessionExpired() {
+        wafBlocked = true;
+        Map<String, String> environment = new HashMap<>();
+        environment.put("TIDB_LOGIN_MODE", "cookie");
+        environment.put("TIDB_COOKIE", "csrftoken=cookie-csrf; ssid=cookie-ssid; uid=cookie-uid");
+
+        TiDbCheckInTask task = task(environment);
+        task.run();
+
+        List<MessageBlock> blocks = task.getMessageBlocks();
+        assertTrue(blocks.get(blocks.size() - 1).toString().startsWith("签到失败：Cookie 已失效"));
+    }
+
+    @Test
     public void reportsCookieWithoutCsrfToken() {
         Map<String, String> environment = new HashMap<>();
         environment.put("TIDB_LOGIN_MODE", "cookie");
@@ -169,6 +223,14 @@ public class TiDbCheckInTaskTest {
     private void handleCheckIn(HttpExchange exchange) throws IOException {
         checkInCookie.set(exchange.getRequestHeaders().getFirst("Cookie"));
         checkInCsrf.set(exchange.getRequestHeaders().getFirst("x-csrftoken"));
+        if (sessionExpired) {
+            json(exchange, 403, "{\"detail\":\"" + TiDbCheckInTask.AUTH_FAILED_DETAIL + "\"}");
+            return;
+        }
+        if (wafBlocked) {
+            json(exchange, 403, "<!DOCTYPE html><html><body>Web应用防火墙</body></html>");
+            return;
+        }
         json(exchange, 200, "{\"detail\":\"签到成功\",\"data\":{\"points\":\"1\",\"tomorrow_points\":\"2\"}}");
     }
 

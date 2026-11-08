@@ -7,6 +7,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.jayjay.autosignin.entity.MessageBlock;
 import org.jayjay.autosignin.entity.MessageLine;
 import org.jayjay.autosignin.entity.NotificationSection;
 
@@ -28,7 +29,11 @@ public class TiDbCheckInTask extends CheckInTask {
     String userUrl = "https://pingkai.cn/accounts/api/me";
     String pointsUrl = "https://pingkai.cn/accounts/api/points/me";
     String redirectTo = "https://pingkai.cn/tidbcommunity/member";
+    /** 服务端在会话失效时返回的 detail，用于把失败转成可直接处理的提示。 */
+    static final String AUTH_FAILED_DETAIL = "Authentication credentials were not provided.";
     private Map<String, String> environment = System.getenv();
+    /** 本次是否走 Cookie 模式，决定会话失效时给出哪种处理建议。 */
+    private boolean cookieMode;
 
     public TiDbCheckInTask() {
     }
@@ -107,6 +112,7 @@ public class TiDbCheckInTask extends CheckInTask {
             return;
         }
         System.out.println("[TiDB] 使用 Cookie 继续签到");
+        cookieMode = true;
         completeCheckIn(cookies, csrfToken);
     }
 
@@ -138,7 +144,12 @@ public class TiDbCheckInTask extends CheckInTask {
                 .execute();
         JSONObject checkInBody = toJSON(checkInRes.body());
         String detail = checkInBody == null ? "" : checkInBody.getStr("detail");
-        System.out.println("[TiDB] 签到结果：" + detail);
+        System.out.println("[TiDB] 签到结果：" + checkInRes.getStatus() + " " + detail);
+        if (isSessionExpired(checkInRes.getStatus(), detail)) {
+            addMessage(buildSessionExpiredBlock());
+            System.out.println("[TiDB] 签到任务结束");
+            return;
+        }
         addMessage("签到结果：", detail);
         JSONObject data = checkInBody == null ? null : checkInBody.getJSONObject("data");
         if (data != null && data.containsKey("points")) {
@@ -150,6 +161,31 @@ public class TiDbCheckInTask extends CheckInTask {
             addMessage(points);
         }
         System.out.println("[TiDB] 签到任务结束");
+    }
+
+    /**
+     * 会话失效有两种表现：接口返回 401 并带英文 detail，或被网关/WAF 拦成 403 非 JSON 响应，
+     * 两者都说明当前 Cookie 不再被服务端认可，需要人工换新 Cookie。
+     */
+    static boolean isSessionExpired(int status, String detail) {
+        return AUTH_FAILED_DETAIL.equals(detail) || status == 401 || status == 403;
+    }
+
+    /**
+     * 会话失效时把原始英文错误换成可直接处理的中文提示，并区分 Cookie 与账号密码两种模式。
+     */
+    private MessageBlock buildSessionExpiredBlock() {
+        if (cookieMode) {
+            return new MessageBlock()
+                    .addLine(new MessageLine().appendBold("签到失败：Cookie 已失效"))
+                    .addLine("原因：服务端返回未提供登录凭证，说明 cookie 里的会话已被清除。")
+                    .addLine("处理：浏览器重新登录 pingkai.cn 抓取 Cookie，覆盖 TIDB_COOKIE")
+                    .addLine("要求：必须包含 csrftoken、ssid、uid 三项，之后重启容器");
+        }
+        return new MessageBlock()
+                .addLine(new MessageLine().appendBold("签到失败：登录凭证无效"))
+                .addLine("原因：账号密码登录后仍未通过签到鉴权。")
+                .addLine("处理：确认 TIDB_USERNAME / TIDB_PASSWORD 正确，或改用 cookie 模式");
     }
 
     static String loginMode(Map<String, String> environment) {

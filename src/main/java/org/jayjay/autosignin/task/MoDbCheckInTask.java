@@ -36,6 +36,10 @@ public class MoDbCheckInTask extends CheckInTask {
     private static final String AES_KEY = "emcs-app-request";
     private static final String AES_IV = "xqgb1vda11s0e94g"; // 可能需要根据实际加密模式调整
 
+    /** 登录偶发 Connection refused，按次数重试，避免整站点当天直接失败。 */
+    int loginMaxAttempts = 3;
+    long loginRetryDelayMs = 3000L;
+
 
     @Override
     public NotificationSection buildNotificationSection() {
@@ -64,9 +68,7 @@ public class MoDbCheckInTask extends CheckInTask {
             JSONObject bodyJson = JSONUtil.createObj();
             bodyJson.set("phoneNum", modbUsername);
             bodyJson.set("password", modbPassword);
-            HttpResponse loginRes = HttpRequest.post(loginUrl).headerMap(headers(), true)
-                    .body(bodyJson.toString())
-                    .execute();
+            HttpResponse loginRes = loginWithRetry(bodyJson);
 
             if (!loginRes.isOk()) {
                 System.err.println("[墨天轮] 登录失败，HTTP " + loginRes.getStatus());
@@ -128,6 +130,27 @@ public class MoDbCheckInTask extends CheckInTask {
             addMessage("墨天轮签到失败，请查看日志");
         }
         return this;
+    }
+
+    /**
+     * 登录请求带重试：网络抖动（如 Connection refused）时重试，最后一次仍失败则抛出最后一次异常。
+     */
+    HttpResponse loginWithRetry(JSONObject bodyJson) {
+        RuntimeException lastError = null;
+        for (int attempt = 1; attempt <= loginMaxAttempts; attempt++) {
+            try {
+                return HttpRequest.post(loginUrl).headerMap(headers(), true)
+                        .body(bodyJson.toString())
+                        .execute();
+            } catch (RuntimeException e) {
+                lastError = e;
+                System.err.println("[墨天轮] 登录请求异常（第 " + attempt + "/" + loginMaxAttempts + " 次）：" + e.getMessage());
+                if (attempt < loginMaxAttempts) {
+                    sleep(loginRetryDelayMs);
+                }
+            }
+        }
+        throw lastError == null ? new IllegalStateException("墨天轮登录重试次数非法") : lastError;
     }
 
     public Map<String, String> headers() {
