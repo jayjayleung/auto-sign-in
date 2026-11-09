@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -59,6 +60,8 @@ public class WatchaCheckInTaskTest {
     private final AtomicInteger pauses = new AtomicInteger();
     private final AtomicInteger aiRequests = new AtomicInteger();
     private final AtomicInteger searchRequests = new AtomicInteger();
+    private final AtomicInteger nativeSearchRequests = new AtomicInteger();
+    private final List<String> searchQueries = Collections.synchronizedList(new ArrayList<String>());
     private volatile boolean searchFails;
     private final AtomicInteger questFetches = new AtomicInteger();
     private final AtomicInteger reviewRequests = new AtomicInteger();
@@ -99,6 +102,8 @@ public class WatchaCheckInTaskTest {
         pauses.set(0);
         aiRequests.set(0);
         searchRequests.set(0);
+        nativeSearchRequests.set(0);
+        searchQueries.clear();
         searchFails = false;
         questFetches.set(0);
         reviewRequests.set(0);
@@ -287,6 +292,9 @@ public class WatchaCheckInTaskTest {
         assertEquals(2, pauses.get());
         assertEquals(2, aiRequests.get());
         assertEquals(2, searchRequests.get());
+        assertEquals(0, nativeSearchRequests.get());
+        assertTrue(searchQueries.get(0).contains("q=切问 官网"));
+        assertTrue(searchQueries.get(1).contains("q=时者 官网"));
         assertEquals(1, reviewRequests.get());
         assertEquals(1, discussRequests.get());
         assertEquals("Bearer ai-test-key", aiAuthorization.get());
@@ -440,6 +448,38 @@ public class WatchaCheckInTaskTest {
     }
 
     @Test
+    public void retriesWithFallbackModelWhenMainModelFails() {
+        aiMode = "mainError";
+        Map<String, String> environment = accountWithAi();
+        environment.put("AI_FALLBACK_MODEL", "lite-model");
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        assertEquals(4, aiRequests.get());
+        assertTrue(aiBodies.get(0).contains("\"model\":\"test-model\""));
+        assertTrue(aiBodies.get(1).contains("\"model\":\"lite-model\""));
+        assertTrue(aiBodies.get(2).contains("\"model\":\"test-model\""));
+        assertTrue(aiBodies.get(3).contains("\"model\":\"lite-model\""));
+        assertEquals(1, reviewRequests.get());
+        assertEquals(1, discussRequests.get());
+    }
+
+    @Test
+    public void keepsMainModelForRewriteAfterRejectedCopy() {
+        aiMode = "banned";
+        Map<String, String> environment = accountWithAi();
+        environment.put("AI_FALLBACK_MODEL", "lite-model");
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        for (String body : aiBodies) {
+            assertTrue(body.contains("\"model\":\"test-model\""));
+        }
+    }
+
+    @Test
     public void skipsPostWhenCopyServiceIsDown() {
         aiMode = "error";
 
@@ -464,13 +504,28 @@ public class WatchaCheckInTaskTest {
         task.run();
 
         assertEquals(1, checkInRequests.get());
-        assertEquals(1, searchRequests.get());
+        assertEquals(4, searchRequests.get());
+        assertEquals(0, nativeSearchRequests.get());
         assertEquals(0, aiRequests.get());
         assertEquals(0, reviewRequests.get());
         assertEquals(0, discussRequests.get());
         String quest = task.getMessageBlocks().get(1).toString();
-        assertTrue(quest.contains("本周帖子：已跳过\n原因：前置猹评处理失败（文案生成失败：search unavailable）"));
+        assertTrue(quest.contains("本周帖子：已跳过\n原因：前置猹评处理失败（文案生成失败：公开搜索返回 HTTP 503）"));
         assertFalse(quest.contains("文案接口不可用"));
+    }
+
+    @Test
+    public void usesNativeSearchOnlyWhenConfigured() {
+        Map<String, String> environment = accountWithAi();
+        environment.put("AI_NATIVE_SEARCH", "true");
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        assertEquals(1, nativeSearchRequests.get());
+        assertEquals(0, searchRequests.get());
+        assertEquals(0, reviewRequests.get());
+        assertTrue(task.getMessageBlocks().get(1).toString().contains("unexpected native search"));
     }
 
     @Test
@@ -541,6 +596,7 @@ public class WatchaCheckInTaskTest {
         environment.put("AI_BASE_URL", baseUrl + "/v1");
         environment.put("AI_API_KEY", "ai-test-key");
         environment.put("AI_MODEL", "test-model");
+        environment.put("AI_SEARCH_URL", baseUrl + "/search");
         return environment;
     }
 
@@ -559,7 +615,11 @@ public class WatchaCheckInTaskTest {
         server.createContext("/api/v2/products/", this::handleProduct);
         server.createContext("/api/v2/discuss/posts", this::handleDiscuss);
         server.createContext("/v1/chat/completions", this::handleAi);
-        server.createContext("/v1/responses", this::handleSearch);
+        server.createContext("/v1/responses", exchange -> {
+            nativeSearchRequests.incrementAndGet();
+            json(exchange, 500, "{\"error\":{\"message\":\"unexpected native search\"}}");
+        });
+        server.createContext("/search", this::handleSearch);
         server.createContext("/api/v2/users/10174946/posts", this::handleUserPosts);
     }
 
@@ -719,7 +779,8 @@ public class WatchaCheckInTaskTest {
         aiRequests.incrementAndGet();
         aiBodies.add(request);
         aiAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
-        if ("error".equals(aiMode)) {
+        if ("error".equals(aiMode)
+                || ("mainError".equals(aiMode) && request.contains("\"model\":\"test-model\""))) {
             json(exchange, 500, "{\"error\":{\"message\":\"busy\"}}");
             return;
         }
@@ -748,22 +809,28 @@ public class WatchaCheckInTaskTest {
     }
 
     private void handleSearch(HttpExchange exchange) throws IOException {
-        readBody(exchange);
         searchRequests.incrementAndGet();
+        searchQueries.add(URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8));
         if (searchFails) {
-            json(exchange, 503, "{\"error\":{\"message\":\"search unavailable\"}}");
+            html(exchange, 503, "<html><body>search unavailable</body></html>");
             return;
         }
-        JSONObject source = JSONUtil.createObj().set("type", "url").set("url", "https://example.com/product");
-        JSONObject search = JSONUtil.createObj()
-                .set("type", "web_search_call")
-                .set("status", "completed")
-                .set("action", JSONUtil.createObj().set("sources", JSONUtil.createArray().put(source)));
-        JSONObject text = JSONUtil.createObj().set("type", "output_text").set("text", "官网资料补充：可对任务结果进一步核对。");
-        JSONObject message = JSONUtil.createObj().set("type", "message")
-                .set("content", JSONUtil.createArray().put(text));
-        json(exchange, 200, JSONUtil.createObj().set("status", "completed")
-                .set("output", JSONUtil.createArray().put(search).put(message)).toString());
+        StringBuilder page = new StringBuilder("<ol>");
+        for (int index = 1; index <= 3; index++) {
+            page.append("<li class='b_algo'><h2><a href='https://example.com/product").append(index)
+                    .append("'>产品官网 ").append(index).append("</a></h2><div class='b_caption'><p>")
+                    .append("官网资料补充：可对任务结果进一步核对。").append("</p></div></li>");
+        }
+        html(exchange, 200, page.append("</ol>").toString());
+    }
+
+    private static void html(HttpExchange exchange, int status, String text) throws IOException {
+        byte[] body = text.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        exchange.sendResponseHeaders(status, body.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(body);
+        }
     }
 
     private String questPayload() {

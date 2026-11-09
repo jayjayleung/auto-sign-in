@@ -56,6 +56,8 @@
 | AI_BASE_URL | 文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
 | AI_API_KEY | 文案接口密钥 | 否 |
 | AI_MODEL | 文案模型名 | 否 |
+| AI_FALLBACK_MODEL | 备用文案模型。主模型超时或报错时，第二次改用它生成；留空则仍用主模型 | 否 |
+| AI_NATIVE_SEARCH | 设为 `true` 时产品资料改由文案服务原生联网搜索，默认 `false` 由程序直接查 Bing | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需要开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 订阅人邮箱地址(收件人)，如需多人订阅使用 `,` 分割，例如: `a@163.com,b@qq.com` | 否 |
@@ -118,6 +120,8 @@ cp .env.example .env
 | AI_BASE_URL | 文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
 | AI_API_KEY | 文案接口密钥 | 否 |
 | AI_MODEL | 文案模型名 | 否 |
+| AI_FALLBACK_MODEL | 备用文案模型。主模型超时或报错时，第二次改用它生成；留空则仍用主模型 | 否 |
+| AI_NATIVE_SEARCH | 设为 `true` 时产品资料改由文案服务原生联网搜索，默认 `false` 由程序直接查 Bing | 否 |
 | EMAIL_USERNAME | 发件人邮箱地址(需开启 SMTP) | 否 |
 | EMAIL_PASSWORD | 发件人邮箱密码(SMTP密码) | 否 |
 | EMAIL_TO | 收件人邮箱，多个用 `,` 分割 | 否 |
@@ -132,7 +136,7 @@ cp .env.example .env
 - 云桥有多个账号时，第一个账号仍可使用无序号变量，第二个账号直接使用 `YUNQIAO_USERNAME_2` / `YUNQIAO_PASSWORD_2`，后续账号继续使用 `_3`、`_4`。
 - 也可以从 `_1` 开始完整编号；无序号和 `_1` 同时配置时，以 `_1` 为准。
 - 观猹使用任务中心的每日签到。`WATCHA_USERNAME` 填写登录用的邮箱或手机号。`WATCHA_PUBLISH` 设为 `true`，并且文案接口 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL` 三项都填写后，每天再发 1 篇当日推荐产品的猹评；本周帖子少于 3 篇时再发 1 篇。两次发布之间会间隔 20 到 90 秒。开关留空或文案接口留空则只签到。
-- 观猹生成文案前会先联网核实产品官网、主要功能和操作流程，再以用过后的第一人称体验口吻生成。文案服务及所选模型需同时支持 Chat Completions 和 Responses，沿用上述三项配置。原生 `web_search` 直接读取搜索结果；兼容服务若只返回 `websearch` 或 `web_search` 函数请求，程序会通过 Bing 公开搜索执行查询，取得摘要和来源后再生成文案。未实际执行搜索、没有返回来源或检索失败时跳过发布。同一产品在本次任务中复用检索资料，文案重写不会重复搜索。搜索资料用于补充产品事实，生成的体验口吻不代表程序实际操作过该产品。
+- 观猹生成文案前会先联网核实产品官网和主要功能，再以用过后的第一人称体验口吻生成。默认由程序用「产品名 官网」「产品名 分类 功能」直接查询 Bing 公开搜索，每个查询失败会重试 1 次，取得摘要和来源后交给 Chat Completions 生成文案，不依赖文案服务的联网能力。文案服务能真正执行原生 `web_search` 时，可设 `AI_NATIVE_SEARCH=true` 改由 Responses 检索；若服务只返回 `websearch` 或 `web_search` 函数请求，仍由程序执行 Bing 查询。`AI_SEARCH_URL` 可替换公开搜索地址，一般不用填。没有搜到资料或来源时跳过发布。文案生成单次最多等待 180 秒，最多尝试 2 次；第一次超时或报错时，第二次改用 `AI_FALLBACK_MODEL`，只是没通过校验时仍用主模型重写。同一产品在本次任务中复用检索资料，文案重写不会重复搜索。搜索资料用于补充产品事实，生成的体验口吻不代表程序实际操作过该产品。
 - 通知方式可选，邮箱/PushPlus/Server酱可按需配置其一或多个。
 
 两个云桥账号的 `.env` 示例：

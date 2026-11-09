@@ -12,8 +12,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -171,6 +174,51 @@ public class AiClientTest {
             assertThrows(IllegalStateException.class, () -> client().search("查官网", "切问"));
         }
         assertEquals(0, searchRequests.get());
+    }
+
+    @Test
+    public void researchSearchesPubliclyWithoutAskingTheCopyService() {
+        String result = client().research("查官网", "切问", queries("切问 官网", "切问 效率工具 功能"));
+
+        assertNull(requestBody.get());
+        assertEquals(2, searchRequests.get());
+        assertTrue(result.contains("切问支持深度检索和资料整理"));
+    }
+
+    @Test
+    public void researchUsesConfiguredSearchEndpoint() {
+        environment.put("AI_SEARCH_URL", "http://127.0.0.1:" + server.getAddress().getPort() + "/search");
+
+        String result = new AiClient(environment, "").research("查官网", "切问", queries("切问 官网"));
+
+        assertEquals(1, searchRequests.get());
+        assertTrue(result.contains("https://example.com/help"));
+    }
+
+    @Test
+    public void researchUsesNativeSearchOnlyWhenEnabled() {
+        environment.put("AI_NATIVE_SEARCH", "true");
+
+        String result = client().research("查官网", "切问", queries("切问 官网"));
+
+        assertEquals("test-model", requestBody.get().getStr("model"));
+        assertEquals(0, searchRequests.get());
+        assertTrue(result.contains("切问提供深度检索"));
+    }
+
+    @Test
+    public void usesFallbackModelOnlyWhenRequestedAndConfigured() {
+        assertEquals("test-model", client().modelName(true));
+
+        environment.put("AI_FALLBACK_MODEL", "lite-model");
+        AiClient client = client();
+
+        assertEquals("test-model", client.modelName(false));
+        assertEquals("lite-model", client.modelName(true));
+    }
+
+    private static Set<String> queries(String... values) {
+        return new LinkedHashSet<String>(Arrays.asList(values));
     }
 
     private AiClient client() {

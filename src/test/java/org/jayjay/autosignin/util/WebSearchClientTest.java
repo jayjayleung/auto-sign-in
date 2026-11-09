@@ -26,6 +26,7 @@ public class WebSearchClientTest {
     private HttpServer server;
     private volatile String responseBody;
     private volatile int responseStatus;
+    private volatile int failuresBeforeSuccess;
     private final AtomicInteger requests = new AtomicInteger();
     private final AtomicReference<String> query = new AtomicReference<>();
 
@@ -35,11 +36,11 @@ public class WebSearchClientTest {
         responseBody = result("https://example.com/help", "切问帮助", "支持深度检索与资料整理。");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/search", exchange -> {
-            requests.incrementAndGet();
+            int count = requests.incrementAndGet();
             query.set(URLDecoder.decode(exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8));
             byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-            exchange.sendResponseHeaders(responseStatus, body.length);
+            exchange.sendResponseHeaders(count <= failuresBeforeSuccess ? 503 : responseStatus, body.length);
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(body);
             }
@@ -103,6 +104,27 @@ public class WebSearchClientTest {
                 () -> client().search(queries("切问 官网")));
 
         assertTrue(error.getMessage().contains("HTTP 429"));
+        assertEquals(2, requests.get());
+    }
+
+    @Test
+    public void retriesFailedRequestOnceBeforeMovingOn() {
+        failuresBeforeSuccess = 1;
+
+        String material = client().search(queries("切问 官网"));
+
+        assertEquals(2, requests.get());
+        assertTrue(material.contains("https://example.com/help"));
+    }
+
+    @Test
+    public void boundsRetriesWhenEveryRequestFails() {
+        responseStatus = 503;
+
+        assertThrows(IllegalStateException.class,
+                () -> client().search(queries("第一个查询", "第二个查询", "第三个查询")));
+
+        assertEquals(4, requests.get());
     }
 
     @Test

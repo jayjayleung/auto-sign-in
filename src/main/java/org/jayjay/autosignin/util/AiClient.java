@@ -17,15 +17,19 @@ import java.util.Set;
  */
 public class AiClient {
 
-    private static final int TIMEOUT = 90000;
+    /** 路由到推理模型时，200 字文案也可能超过 90 秒；定时任务无人等待，放宽到 180 秒。 */
+    private static final int CHAT_TIMEOUT = 180000;
+    private static final int SEARCH_TIMEOUT = 90000;
 
     private final String baseUrl;
     private final String apiKey;
     private final String model;
+    private final String fallbackModel;
+    private final boolean nativeSearch;
     private final WebSearchClient webSearch;
 
     public AiClient(Map<String, String> environment, String platform) {
-        this(environment, platform, new WebSearchClient());
+        this(environment, platform, null);
     }
 
     AiClient(Map<String, String> environment, String platform, WebSearchClient webSearch) {
@@ -33,7 +37,10 @@ public class AiClient {
         this.baseUrl = value(environment, prefix + "AI_BASE_URL");
         this.apiKey = value(environment, prefix + "AI_API_KEY");
         this.model = value(environment, prefix + "AI_MODEL");
-        this.webSearch = webSearch;
+        this.fallbackModel = value(environment, prefix + "AI_FALLBACK_MODEL");
+        this.nativeSearch = "true".equalsIgnoreCase(value(environment, prefix + "AI_NATIVE_SEARCH"));
+        this.webSearch = webSearch != null ? webSearch
+                : new WebSearchClient(value(environment, prefix + "AI_SEARCH_URL"));
     }
 
     public boolean isReady() {
@@ -46,15 +53,24 @@ public class AiClient {
     }
 
     public String complete(String system, String user) {
+        return complete(system, user, false);
+    }
+
+    /** 未配置 AI_FALLBACK_MODEL 时，即使要求备用模型也使用主模型。 */
+    public String modelName(boolean fallback) {
+        return fallback && StrUtil.isNotBlank(fallbackModel) ? fallbackModel : model;
+    }
+
+    public String complete(String system, String user, boolean fallback) {
         JSONArray messages = new JSONArray();
         messages.add(JSONUtil.createObj().set("role", "system").set("content", system));
         messages.add(JSONUtil.createObj().set("role", "user").set("content", user));
         JSONObject payload = JSONUtil.createObj()
-                .set("model", model)
+                .set("model", modelName(fallback))
                 .set("temperature", 0.8)
                 .set("max_tokens", 3000)
                 .set("messages", messages);
-        JSONObject json = request(chatEndpoint(baseUrl), payload);
+        JSONObject json = request(chatEndpoint(baseUrl), payload, CHAT_TIMEOUT);
         JSONArray choices = json.getJSONArray("choices");
         if (choices == null || choices.isEmpty()) {
             throw new IllegalStateException("文案生成失败：服务没有返回文案");
@@ -70,6 +86,14 @@ public class AiClient {
         return message.getStr("content");
     }
 
+    /**
+     * 检索产品资料。默认由程序直接执行公开搜索；AI_NATIVE_SEARCH=true 时改由文案服务的 Responses 联网搜索，
+     * 兼容服务不执行原生搜索、只回查询词，会多一次等待模型的往返。
+     */
+    public String research(String system, String user, Set<String> queries) {
+        return nativeSearch ? search(system, user) : webSearch.search(queries);
+    }
+
     /** 原生搜索直接读取结果；兼容服务返回的 websearch 函数由程序执行，必须取得实际资料和来源。 */
     public String search(String system, String user) {
         JSONObject payload = JSONUtil.createObj()
@@ -80,7 +104,7 @@ public class AiClient {
                 .set("tool_choice", "required")
                 .set("include", JSONUtil.createArray().put("web_search_call.action.sources"))
                 .set("max_output_tokens", 3000);
-        JSONObject json = request(responsesEndpoint(baseUrl), payload);
+        JSONObject json = request(responsesEndpoint(baseUrl), payload, SEARCH_TIMEOUT);
         if (!"completed".equals(json.getStr("status"))) {
             throw new IllegalStateException("文案生成失败：联网搜索未完成");
         }
@@ -175,7 +199,7 @@ public class AiClient {
         return value;
     }
 
-    private JSONObject request(String endpoint, JSONObject payload) {
+    private JSONObject request(String endpoint, JSONObject payload, int timeout) {
         String body;
         int status;
         try (HttpResponse response = HttpRequest.post(endpoint)
@@ -183,7 +207,7 @@ public class AiClient {
                 .header("Content-Type", "application/json;charset=UTF-8")
                 .header("Accept", "application/json")
                 .body(payload.toString())
-                .timeout(TIMEOUT)
+                .timeout(timeout)
                 .execute()) {
             body = response.body();
             status = response.getStatus();

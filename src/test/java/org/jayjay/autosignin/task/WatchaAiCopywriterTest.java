@@ -5,6 +5,7 @@ import cn.hutool.json.JSONUtil;
 import org.jayjay.autosignin.util.AiClient;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -115,5 +116,13 @@ public class WatchaAiCopywriterTest {
         assertEquals("标题为空", WatchaAiCopywriter.rejectPost("  ",
                 Arrays.asList("面向科研人员的介绍还没写清推荐依据，所以发布前会先看推荐是怎么来的。"),
                 PRODUCT_7, Arrays.asList("面向科研人员")));
+    }
+
+    @Test
+    public void buildsSearchQueriesFromNameAndFirstCategory() {
+        assertEquals(Arrays.asList("切问 官网", "切问 效率工具 功能"),
+                new ArrayList<String>(WatchaAiCopywriter.searchQueries("切问", "效率工具、AI 搜索")));
+        assertEquals(Arrays.asList("切问 官网", "切问 功能"),
+                new ArrayList<String>(WatchaAiCopywriter.searchQueries("切问", "")));
     }
 }
