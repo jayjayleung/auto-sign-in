@@ -22,12 +22,18 @@ public class AiClient {
     private final String baseUrl;
     private final String apiKey;
     private final String model;
+    private final WebSearchClient webSearch;
 
     public AiClient(Map<String, String> environment, String platform) {
+        this(environment, platform, new WebSearchClient());
+    }
+
+    AiClient(Map<String, String> environment, String platform, WebSearchClient webSearch) {
         String prefix = StrUtil.isBlank(platform) ? "" : platform.trim().toUpperCase() + "_";
         this.baseUrl = value(environment, prefix + "AI_BASE_URL");
         this.apiKey = value(environment, prefix + "AI_API_KEY");
         this.model = value(environment, prefix + "AI_MODEL");
+        this.webSearch = webSearch;
     }
 
     public boolean isReady() {
@@ -64,7 +70,7 @@ public class AiClient {
         return message.getStr("content");
     }
 
-    /** 通过 Responses 的原生搜索工具查资料，必须有真实搜索调用和来源才算成功。 */
+    /** 原生搜索直接读取结果；兼容服务返回的 websearch 函数由程序执行，必须取得实际资料和来源。 */
     public String search(String system, String user) {
         JSONObject payload = JSONUtil.createObj()
                 .set("model", model)
@@ -82,12 +88,14 @@ public class AiClient {
         boolean searched = false;
         StringBuilder text = new StringBuilder();
         Set<String> sources = new LinkedHashSet<String>();
+        Set<String> queries = new LinkedHashSet<String>();
         if (output != null) {
             for (int index = 0; index < output.size(); index++) {
                 JSONObject item = output.getJSONObject(index);
                 if (item == null) {
                     continue;
                 }
+                addSearchQuery(queries, item);
                 if ("web_search_call".equals(item.getStr("type"))
                         && "completed".equals(item.getStr("status"))) {
                     searched = true;
@@ -134,6 +142,9 @@ public class AiClient {
             }
         }
         if (!searched) {
+            if (!queries.isEmpty()) {
+                return webSearch.search(queries);
+            }
             throw new IllegalStateException("文案生成失败：服务未执行联网搜索");
         }
         if (text.length() == 0 || sources.isEmpty()) {
@@ -193,6 +204,26 @@ public class AiClient {
         if (sources.size() < 6 && StrUtil.isNotBlank(url) && url.length() <= 1000
                 && (url.startsWith("https://") || url.startsWith("http://"))) {
             sources.add(url);
+        }
+    }
+
+    private static void addSearchQuery(Set<String> queries, JSONObject item) {
+        if (queries.size() >= 2 || !"function_call".equals(item.getStr("type"))
+                || !"completed".equals(item.getStr("status"))
+                || !("websearch".equals(item.getStr("name")) || "web_search".equals(item.getStr("name")))) {
+            return;
+        }
+        try {
+            JSONObject arguments = parseJson(item.getStr("arguments"));
+            Object query = arguments == null ? null : arguments.get("query");
+            if (query instanceof CharSequence) {
+                String value = query.toString().trim();
+                if (!value.isEmpty() && value.length() <= 300) {
+                    queries.add(value);
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // 无效的函数参数不能当作搜索成功，也不能用来请求外部网站。
         }
     }
 

@@ -14,10 +14,12 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -26,18 +28,33 @@ public class AiClientTest {
     private HttpServer server;
     private Map<String, String> environment;
     private volatile String responseBody;
+    private volatile String searchBody;
+    private final AtomicInteger searchRequests = new AtomicInteger();
+    private final AtomicReference<String> searchAuthorization = new AtomicReference<>();
     private final AtomicReference<JSONObject> requestBody = new AtomicReference<>();
     private final AtomicReference<String> authorization = new AtomicReference<>();
 
     @Before
     public void setUp() throws IOException {
         responseBody = searchResponse(true, true, false).toString();
+        searchBody = "<ol><li class='b_algo'><h2><a href='https://example.com/help'>切问帮助</a></h2>"
+                + "<div class='b_caption'><p>切问支持深度检索和资料整理。</p></div></li></ol>";
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/responses", exchange -> {
             requestBody.set(JSONUtil.parseObj(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)));
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.createContext("/search", exchange -> {
+            searchRequests.incrementAndGet();
+            searchAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            byte[] body = searchBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(body);
@@ -69,6 +86,7 @@ public class AiClientTest {
         assertTrue(result.contains("切问提供深度检索"));
         assertTrue(result.contains("https://example.com/help"));
         assertFalse(result.contains("内部推理"));
+        assertEquals(0, searchRequests.get());
     }
 
     @Test
@@ -115,8 +133,55 @@ public class AiClientTest {
         assertTrue(client().search("查官网", "切问").contains("切问提供深度检索"));
     }
 
+    @Test
+    public void executesFunctionSearchBeforeReturningMaterial() {
+        responseBody = functionResponse("websearch", "{\"query\":\"切问 官网 功能\"}").toString();
+
+        String result = client().search("查官网", "切问");
+
+        assertEquals(1, searchRequests.get());
+        assertNull(searchAuthorization.get());
+        assertTrue(result.contains("切问支持深度检索和资料整理"));
+        assertTrue(result.contains("检索来源：\nhttps://example.com/help"));
+    }
+
+    @Test
+    public void rejectsFunctionSearchWhenExecutionHasNoResults() {
+        responseBody = functionResponse("web_search", "{\"query\":\"切问 官网\"}").toString();
+        searchBody = "<html><body>请稍后再试</body></html>";
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client().search("查官网", "切问"));
+
+        assertEquals(1, searchRequests.get());
+        assertTrue(error.getMessage().contains("公开搜索没有返回可用资料或来源"));
+    }
+
+    @Test
+    public void neverExecutesUnrelatedOrMalformedFunctions() {
+        JSONObject[] invalid = {
+                functionResponse("run_command", "{\"query\":\"切问\"}"),
+                functionResponse("websearch", "not-json"),
+                functionResponse("websearch", "{\"query\":[\"切问\"]}"),
+                functionResponse("websearch", "{\"query\":\"切问\"}")
+                        .set("status", "incomplete")
+        };
+        for (JSONObject response : invalid) {
+            responseBody = response.toString();
+            assertThrows(IllegalStateException.class, () -> client().search("查官网", "切问"));
+        }
+        assertEquals(0, searchRequests.get());
+    }
+
     private AiClient client() {
-        return new AiClient(environment, "");
+        return new AiClient(environment, "",
+                new WebSearchClient("http://127.0.0.1:" + server.getAddress().getPort() + "/search"));
+    }
+
+    private static JSONObject functionResponse(String name, String arguments) {
+        return JSONUtil.createObj().set("status", "completed").set("output", JSONUtil.createArray()
+                .put(JSONUtil.createObj().set("type", "function_call").set("status", "completed")
+                        .set("name", name).set("arguments", arguments)));
     }
 
     private static JSONObject searchResponse(boolean withSearch, boolean withSources, boolean withCitation) {

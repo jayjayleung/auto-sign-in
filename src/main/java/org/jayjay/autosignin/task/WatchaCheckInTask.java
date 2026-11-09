@@ -236,9 +236,9 @@ public class WatchaCheckInTask extends CheckInTask {
             JSONObject items = prepareQuests(token);
             claimAll(items, token, run);
             publishReviews(items, token, run);
-            if (run.aiDown) {
+            if (run.aiFailure != null) {
                 run.block.addLine("本周帖子：已跳过");
-                run.block.addLine("原因：文案接口不可用");
+                run.block.addLine("原因：前置猹评处理失败（", run.aiFailure, "）");
             } else {
                 publishPosts(items, token, run);
             }
@@ -485,10 +485,11 @@ public class WatchaCheckInTask extends CheckInTask {
         WatchaAiCopywriter.DraftResult draft = copywriter.writeReview(
                 target.name, target.slogan, target.categories, target.description, target.id);
         if (!draft.ok()) {
+            String failure = safeMessage(draft.failure);
             run.block.addLine("今日猹评：已跳过");
-            run.block.addLine("原因：", safeMessage(draft.failure));
+            run.block.addLine("原因：", failure);
             if (draft.failure != null && draft.failure.startsWith("文案生成失败")) {
-                run.aiDown = true;
+                run.aiFailure = failure;
             }
             return;
         }
@@ -917,7 +918,7 @@ public class WatchaCheckInTask extends CheckInTask {
         private final Set<Integer> usedProductIds = new LinkedHashSet<Integer>();
         private List<LoadedProduct> products;
         private boolean published;
-        private boolean aiDown;
+        private String aiFailure;
         private int reviewedProductId;
     }
 

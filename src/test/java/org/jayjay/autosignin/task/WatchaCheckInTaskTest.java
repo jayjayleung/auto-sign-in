@@ -452,8 +452,8 @@ public class WatchaCheckInTaskTest {
         String quest = task.getMessageBlocks().get(1).toString();
         assertTrue(quest.contains("文案生成失败"));
         assertTrue(quest.contains("busy"));
-        assertTrue(quest.contains("本周帖子：已跳过"));
-        assertTrue(quest.contains("文案接口不可用"));
+        assertTrue(quest.contains("本周帖子：已跳过\n原因：前置猹评处理失败（文案生成失败：busy）"));
+        assertFalse(quest.contains("文案接口不可用"));
     }
 
     @Test
@@ -468,7 +468,9 @@ public class WatchaCheckInTaskTest {
         assertEquals(0, aiRequests.get());
         assertEquals(0, reviewRequests.get());
         assertEquals(0, discussRequests.get());
-        assertTrue(task.getMessageBlocks().get(1).toString().contains("search unavailable"));
+        String quest = task.getMessageBlocks().get(1).toString();
+        assertTrue(quest.contains("本周帖子：已跳过\n原因：前置猹评处理失败（文案生成失败：search unavailable）"));
+        assertFalse(quest.contains("文案接口不可用"));
     }
 
     @Test
