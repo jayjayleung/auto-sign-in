@@ -52,6 +52,8 @@ public class WatchaCheckInTaskTest {
     private volatile boolean postingClaimed;
     private volatile boolean thinProducts;
     private volatile int weeklyPostCount;
+    private volatile boolean postProgressLags;
+    private volatile int pendingPosts;
     private volatile String aiMode = "ok";
     private volatile boolean postedToday;
     private volatile boolean postedYesterday;
@@ -94,6 +96,8 @@ public class WatchaCheckInTaskTest {
         postingClaimed = false;
         thinProducts = false;
         weeklyPostCount = 0;
+        postProgressLags = false;
+        pendingPosts = 0;
         aiMode = "ok";
         postedToday = false;
         postedYesterday = false;
@@ -289,7 +293,7 @@ public class WatchaCheckInTaskTest {
 
         task.run();
 
-        assertEquals(2, pauses.get());
+        assertEquals(3, pauses.get());
         assertEquals(2, aiRequests.get());
         assertEquals(2, searchRequests.get());
         assertEquals(0, nativeSearchRequests.get());
@@ -330,6 +334,24 @@ public class WatchaCheckInTaskTest {
                 + "领取奖励：每周猹评 1/3 篇，获得 30 瓜子\n"
                 + "领取奖励：每周发帖 1/3 篇，获得 15 瓜子\n"
                 + "本次获得瓜子：83", task.getMessageBlocks().get(1).toString());
+    }
+
+    @Test
+    public void claimsDelayedPostRewardEvenWhenFirstRoundClaimedOthers() {
+        postProgressLags = true;
+
+        WatchaCheckInTask task = questTask(accountWithAi());
+        task.run();
+
+        assertEquals(1, discussRequests.get());
+        assertEquals(3, pauses.get());
+        assertEquals(3, claimPaths.size());
+        assertTrue(claimPaths.get(0).contains("/quests/19/claim-reward"));
+        assertTrue(claimPaths.get(1).contains("review_1"));
+        assertTrue(claimPaths.get(2).contains("posting_1"));
+        String quest = task.getMessageBlocks().get(1).toString();
+        assertTrue(quest.contains("领取奖励：每周发帖 1/3 篇，获得 15 瓜子\n"));
+        assertTrue(quest.endsWith("\n本次获得瓜子：83"));
     }
 
     @Test
@@ -437,7 +459,7 @@ public class WatchaCheckInTaskTest {
         WatchaCheckInTask task = questTask(accountWithAi());
         task.run();
 
-        assertEquals(2, pauses.get());
+        assertEquals(3, pauses.get());
         assertEquals(3, aiRequests.get());
         assertEquals(1, searchRequests.get());
         assertEquals(0, reviewRequests.get());
@@ -738,6 +760,8 @@ public class WatchaCheckInTaskTest {
         }
         questFetches.incrementAndGet();
         json(exchange, 200, questPayload());
+        weeklyPostCount += pendingPosts;
+        pendingPosts = 0;
     }
 
     private void handleProduct(HttpExchange exchange) throws IOException {
@@ -770,7 +794,11 @@ public class WatchaCheckInTaskTest {
     private void handleDiscuss(HttpExchange exchange) throws IOException {
         discussBody.set(readBody(exchange));
         discussRequests.incrementAndGet();
-        weeklyPostCount++;
+        if (postProgressLags) {
+            pendingPosts++;
+        } else {
+            weeklyPostCount++;
+        }
         json(exchange, 200, "{\"statusCode\":200,\"data\":{\"id\":21}}");
     }
 

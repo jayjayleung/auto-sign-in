@@ -305,12 +305,13 @@ public class WatchaCheckInTask extends CheckInTask {
     }
 
     /**
-     * 取一次进度并领取。发布过的账号再多取一次，服务端进度刷新有延迟。
+     * 取一次进度并领取。发布过的账号再多取一次，服务端进度刷新有延迟；
+     * 首轮领到别的奖励不代表刚发布的进度已刷新，所以不能据此跳过补领。
      */
     private void claimWithRetry(String token, QuestRun run) {
         JSONObject items = fetchQuests(token);
         claimAll(items, token, run);
-        if (!run.published || hasClaimable(items)) {
+        if (!run.published) {
             return;
         }
         try {
@@ -325,30 +326,6 @@ public class WatchaCheckInTask extends CheckInTask {
             return;
         }
         claimAll(items, token, run);
-    }
-
-    private static boolean hasClaimable(JSONObject items) {
-        if (items == null) {
-            return false;
-        }
-        JSONObject daily = items.getJSONObject("daily.product_review");
-        if (daily != null && "claimable".equals(daily.getStr("status"))) {
-            return true;
-        }
-        for (String code : CLAIM_CODES) {
-            JSONObject quest = items.getJSONObject(code);
-            JSONArray tiers = quest == null ? null : quest.getJSONArray("completion_items");
-            if (tiers == null) {
-                continue;
-            }
-            for (int index = 0; index < tiers.size(); index++) {
-                JSONObject tier = tiers.getJSONObject(index);
-                if (tier != null && "claimable".equals(tier.getStr("status"))) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private void claimQuest(JSONObject quest, String token, QuestRun run) {
