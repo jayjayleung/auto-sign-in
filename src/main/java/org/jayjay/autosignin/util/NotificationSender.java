@@ -24,6 +24,29 @@ public class NotificationSender {
     public String PUSH_PLUS_TOKEN = System.getenv("PUSH_PLUS_TOKEN");
     public String SERVER_CHAN_TOKEN = System.getenv("SERVER_CHAN_TOKEN");
 
+    /**
+     * 通知标题。默认固定为「签到结果」，有站点失败时追加异常数，
+     * 这样锁屏上也能看出今天要不要点开排查。
+     */
+    String buildTitle(List<NotificationSection> sections) {
+        int failed = 0;
+        if (sections != null) {
+            for (NotificationSection section : sections) {
+                if (!section.hasContent()) {
+                    continue;
+                }
+                for (org.jayjay.autosignin.entity.MessageBlock block : section.getBlocks()) {
+                    String text = block == null ? "" : block.toPlainText();
+                    if (text.contains("失败")) {
+                        failed++;
+                        break;
+                    }
+                }
+            }
+        }
+        return failed > 0 ? "签到结果（" + failed + " 个异常）" : "签到结果";
+    }
+
 
     /**
      * 过滤无有效内容的任务结果，并依次调用已配置的通知渠道。
@@ -69,9 +92,8 @@ public class NotificationSender {
         account.setUser(EMAIL_USERNAME);
         account.setPass(EMAIL_PASSWORD);
         String message = MessageRenderer.toHtml(sections);
-//        System.out.println(message);
         MailUtil.send(account, CollUtil.toList(EMAIL_TO.split(",")),
-                "签到结果", message, true);
+                buildTitle(sections), message, true);
         System.out.println("[通知] 邮件通知发送成功");
     }
 
@@ -98,7 +120,7 @@ public class NotificationSender {
     JSONObject createPushPlusBody(List<NotificationSection> sections) {
         JSONObject body = new JSONObject();
         body.set("token", PUSH_PLUS_TOKEN);
-        body.set("title", "签到结果");
+        body.set("title", buildTitle(sections));
         body.set("content", MessageRenderer.toMarkdown(sections));
         body.set("template", "markdown");
         return body;
@@ -116,7 +138,7 @@ public class NotificationSender {
         String url = "https://sctapi.ftqq.com/" + SERVER_CHAN_TOKEN + ".send";
         JSONObject body = new JSONObject();
 //        body.set("token", SERVER_CHAN_TOKEN);
-        body.set("title", "签到结果");
+        body.set("title", buildTitle(sections));
         String message = MessageRenderer.toMarkdown(sections);
 //        System.out.println(message);
         body.set("desp", message);

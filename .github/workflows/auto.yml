@@ -31,6 +31,8 @@ env:
   WATCHA_USERNAME: ${{ secrets.WATCHA_USERNAME }}
   WATCHA_PASSWORD: ${{ secrets.WATCHA_PASSWORD }}
   WATCHA_PUBLISH: ${{ secrets.WATCHA_PUBLISH }}
+  SIEMENS_USERNAME: ${{ secrets.SIEMENS_USERNAME }}
+  SIEMENS_PASSWORD: ${{ secrets.SIEMENS_PASSWORD }}
   AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
   AI_API_KEY: ${{ secrets.AI_API_KEY }}
   AI_MODEL: ${{ secrets.AI_MODEL }}

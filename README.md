@@ -13,6 +13,7 @@
 - **[永洪社区](https://club.yonghongtech.com/)** 签到+抽抽乐
 - **[云桥积分中心](https://api.yunqiao.me/custom/93bbf0afef76f203)** 多账号签到
 - **[观猹任务中心](https://watcha.cn/quest)** 每日签到、每日猹评和每周发帖
+- **[西门子工业支持中心](https://www.ad.siemens.com.cn/MySupport/index.aspx)** 每日签到
 
 
 ## 如何使用?
@@ -53,6 +54,9 @@
 | WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
 | WATCHA_PASSWORD | 观猹密码 | 否 |
 | WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
+| SIEMENS_USERNAME | 西门子工业支持中心账号，用户名、手机号或邮箱 | 否 |
+| SIEMENS_PASSWORD | 西门子工业支持中心密码 | 否 |
+| SIEMENS_DAILY_TASKS | 西门子每日任务，默认开启；设为 `false` 时只签到 | 否 |
 | AI_BASE_URL | 文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
 | AI_API_KEY | 文案接口密钥 | 否 |
 | AI_MODEL | 文案模型名 | 否 |
@@ -117,6 +121,9 @@ cp .env.example .env
 | WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
 | WATCHA_PASSWORD | 观猹密码 | 否 |
 | WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
+| SIEMENS_USERNAME | 西门子工业支持中心账号，用户名、手机号或邮箱 | 否 |
+| SIEMENS_PASSWORD | 西门子工业支持中心密码 | 否 |
+| SIEMENS_DAILY_TASKS | 西门子每日任务，默认开启；设为 `false` 时只签到 | 否 |
 | AI_BASE_URL | 文案接口地址，填到版本前缀，例如 `https://api.openai.com/v1` | 否 |
 | AI_API_KEY | 文案接口密钥 | 否 |
 | AI_MODEL | 文案模型名 | 否 |
@@ -135,6 +142,10 @@ cp .env.example .env
 - 云桥只有一个账号时可直接使用 `YUNQIAO_USERNAME` / `YUNQIAO_PASSWORD`，无需添加 `_1`。
 - 云桥有多个账号时，第一个账号仍可使用无序号变量，第二个账号直接使用 `YUNQIAO_USERNAME_2` / `YUNQIAO_PASSWORD_2`，后续账号继续使用 `_3`、`_4`。
 - 也可以从 `_1` 开始完整编号；无序号和 `_1` 同时配置时，以 `_1` 为准。
+- 西门子工业支持中心使用 `SIEMENS_USERNAME` / `SIEMENS_PASSWORD` 登录「我的支持中心」并完成每日签到。账号可以填用户名、手机号或邮箱。未配置则跳过。账号如果开启了短信二次验证，自动登录无法完成，通知里会写明原因。
+- 西门子每日任务默认一起执行：签到后读取任务列表，把还没完成的收藏问答、收藏帖子、找答案回答、找答案提问、评论最佳答案、论坛回帖、评论帖子、论坛发帖、论坛发故事帖逐项做掉。帖子、回答和评论的文案由商城「西游 AI 助手」生成，走的是同一套西门子账号，所以内容来自官方知识库而不是随机编造。`SIEMENS_DAILY_TASKS=false` 可以只签到不执行这些动作。故事帖要站点审核，提交当天不一定计入任务，通知里会写明剩下哪些没完成。短时间反复登录会触发风控，返回「登录太频繁」或「账号被临时锁定」，这种情况下等一段时间再跑。
+- 西门子签到后会检查抽奖次数，`GetCoinAwardCount` 大于 0 就自动抽西币，`GetBigAwardCount` 大于 0 就抽实物奖，中奖结果写进通知。抽奖机会由签到发放，`NextSignGiveCoinAwardCount=true` 表示下次签到还会给，所以每天都检查一次能避免机会堆积浪费。
+- 西门子每日任务内置风控保护：同一账号当天执行过就不再重复跑，避免多个容器或 Actions 同时配置导致重复发帖被判灌水；论坛类操作（发帖、故事帖、回帖、评论）和找答案类操作（提问、回答、评论最佳答案）各自保持至少 2 分钟间隔；连续 2 项失败会自动中止剩余任务，避免在站点风控期间继续请求。AI 生成单次超时放宽到 60 秒。
 - 观猹使用任务中心的每日签到。`WATCHA_USERNAME` 填写登录用的邮箱或手机号。`WATCHA_PUBLISH` 设为 `true`，并且文案接口 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL` 三项都填写后，每天再发 1 篇当日推荐产品的猹评；本周帖子少于 3 篇时再发 1 篇。两次发布之间会间隔 20 到 90 秒。开关留空或文案接口留空则只签到。
 - 观猹生成文案前会先联网核实产品官网和主要功能，再以用过后的第一人称体验口吻生成。默认由程序用「产品名 官网」「产品名 分类 功能」直接查询 Bing 公开搜索，每个查询失败会重试 1 次，取得摘要和来源后交给 Chat Completions 生成文案，不依赖文案服务的联网能力。文案服务能真正执行原生 `web_search` 时，可设 `AI_NATIVE_SEARCH=true` 改由 Responses 检索；若服务只返回 `websearch` 或 `web_search` 函数请求，仍由程序执行 Bing 查询。`AI_SEARCH_URL` 可替换公开搜索地址，一般不用填。没有搜到资料或来源时跳过发布。文案生成单次最多等待 180 秒，最多尝试 2 次；第一次超时或报错时，第二次改用 `AI_FALLBACK_MODEL`，只是没通过校验时仍用主模型重写。同一产品在本次任务中复用检索资料，文案重写不会重复搜索。搜索资料用于补充产品事实，生成的体验口吻不代表程序实际操作过该产品。
 - 通知方式可选，邮箱/PushPlus/Server酱可按需配置其一或多个。

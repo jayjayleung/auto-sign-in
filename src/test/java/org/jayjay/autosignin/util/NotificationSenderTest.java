@@ -31,4 +31,20 @@ public class NotificationSenderTest {
                 body.getStr("content")
         );
     }
+
+    @Test
+    public void titleAppendsFailureCount() {
+        NotificationSender sender = new NotificationSender();
+        MessageBlock ok = MessageBlock.text("签到结果：今日已签到");
+        MessageBlock failed = MessageBlock.text("签到失败：用户名或密码错误");
+
+        assertEquals("签到结果", sender.buildTitle(Collections.singletonList(
+                new NotificationSection("云桥签到", Collections.singletonList(ok)))));
+        assertEquals("签到结果（1 个异常）", sender.buildTitle(java.util.Arrays.asList(
+                new NotificationSection("云桥签到", Collections.singletonList(ok)),
+                new NotificationSection("西门子签到", Collections.singletonList(failed)))));
+        assertEquals("签到结果（2 个异常）", sender.buildTitle(java.util.Arrays.asList(
+                new NotificationSection("云桥签到", Collections.singletonList(failed)),
+                new NotificationSection("西门子签到", Collections.singletonList(failed)))));
+    }
 }
