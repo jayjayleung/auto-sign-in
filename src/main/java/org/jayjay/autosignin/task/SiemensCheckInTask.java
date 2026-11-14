@@ -708,11 +708,6 @@ public class SiemensCheckInTask extends CheckInTask {
         }
     }
 
-    /** 判断某个每日任务是否已经被站点标记为完成（EventTasksStatus 2）。 */
-    boolean dailyTaskCompleted(String taskCode) {
-        return taskStatus(taskCode) == Boolean.TRUE;
-    }
-
     /**
      * 查某个每日任务的完成状态，读不到任务列表时返回 null。
      * 三态区分很重要：false 是「确认还没完成」，null 是「无法判断」。
