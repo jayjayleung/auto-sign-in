@@ -35,8 +35,8 @@ final class SiemensAnswerActions {
     /**
      * 收藏一条问答。列表页的收藏入口已下线，这里直接提交弹窗表单。
      * <p>
-     * 站点只允许收藏「已解决」的问答：对待解决的问题提交 Favorite.aspx 会返回「参数不正确」
-     * 或者静默不生效，所以候选从「新解决的问题」里取，而不是待解决问题。
+     * 站点对已收藏的问答返回「您已经收藏过了」，对未收藏的返回可编辑标签的表单。
+     * 收藏必须带标签，不提交标签字段时站点会原样返回表单（静默不生效）。
      */
     String collectQuestion(String questionId) {
         Set<String> favorites = favoriteQuestionIds();
@@ -57,38 +57,31 @@ final class SiemensAnswerActions {
             System.out.println("[西门子] 没有可收藏的问答");
             return questionId;
         }
-        String target = null;
-        for (String candidate : candidates) {
-            if (postFavoriteForm(candidate)) {
-                target = candidate;
-                break;
-            }
-            System.out.println("[西门子] 收藏问答 " + candidate + " 未生效，换下一条");
-        }
-        if (target == null) {
-            target = candidates.get(0);
-            System.out.println("[西门子] 收藏问答全部未生效：" + candidates);
-            task.markTaskFailed(true);
-            return target;
-        }
-        if (collectionTaskDone()) {
+        // 只试一条：站点对收藏有频率限制，多试容易触发风控。
+        String target = candidates.get(0);
+        postFavoriteForm(target);
+        Boolean done = collectionTaskDone();
+        if (Boolean.TRUE.equals(done)) {
             System.out.println("[西门子] 收藏问答成功：" + target);
+        } else if (done == null) {
+            System.out.println("[西门子] 收藏问答已提交，任务状态读取失败：" + target);
         } else {
-            // 收藏进去了但任务状态没翻，站点统计可能有延迟，这里只记录不判失败。
-            System.out.println("[西门子] 收藏问答已提交，任务状态未更新：" + target);
+            System.out.println("[西门子] 收藏问答未生效：" + target);
+            task.markTaskFailed(true);
         }
         return target;
     }
 
-    /** 收藏问答是每日任务，任务状态变 2 才算真的成功。 */
-    private boolean collectionTaskDone() {
-        return task.dailyTaskCompleted(SiemensCheckInTask.TASK_COLLECT_QUESTION);
+    /** 收藏问答是每日任务，返回 true 表示已确认完成，null 表示读不到任务状态。 */
+    private Boolean collectionTaskDone() {
+        return task.taskStatus(SiemensCheckInTask.TASK_COLLECT_QUESTION);
     }
 
     /**
-     * 提交收藏弹窗表单。只提交 __VIEWSTATE 和 __VIEWSTATEGENERATOR，
-     * 带上 tagSave/tagSaveType 会被判「参数不正确」。
-     * 返回 false 有两种情况：站点明确报错，或者原样返回表单（静默不生效）。
+     * 提交收藏弹窗表单。
+     * <p>
+     * 必须带上标签：tagSave 填标签名，tagSaveType 填 0（新建）。标签可以为站点要求的
+     * 通用词，不带标签站点只会原样返回表单、不报错也不生效。
      */
     private boolean postFavoriteForm(String questionId) {
         String page = task.supportBaseUrl() + "/service/answer/Favorite.aspx?QID=" + questionId;
@@ -96,24 +89,42 @@ final class SiemensAnswerActions {
         if (form == null) {
             return false;
         }
+        if (isAlreadyFavorited(form.body)) {
+            System.out.println("[西门子] 收藏问答 " + questionId + " 之前已收藏");
+            return true;
+        }
         String viewState = SiemensCheckInTask.inputValue(form.body, "__VIEWSTATE");
         String viewStateGenerator = SiemensCheckInTask.inputValue(form.body, "__VIEWSTATEGENERATOR");
         if (StrUtil.isBlank(viewState) || StrUtil.isBlank(viewStateGenerator)) {
             System.out.println("[西门子] 收藏问答页面没有表单");
             return false;
         }
+        String tag = favoriteTag();
         String body = "&__VIEWSTATE=" + SiemensCheckInTask.encode(viewState)
-                + "&__VIEWSTATEGENERATOR=" + SiemensCheckInTask.encode(viewStateGenerator);
+                + "&__VIEWSTATEGENERATOR=" + SiemensCheckInTask.encode(viewStateGenerator)
+                + "&tagSave=" + SiemensCheckInTask.encode(tag)
+                + "&tagSaveType=0"
+                + "&tagName=" + SiemensCheckInTask.encode(tag);
         SiemensCheckInTask.HttpResult result = task.post(page, body, task.supportHeaders(page));
         System.out.println("[西门子] 收藏问答 HTTP " + result.status);
         if (result.status != 200 || result.body == null) {
             return false;
         }
-        if (result.body.contains("参数不正确")) {
-            return false;
+        boolean wrongParams = result.body.contains("参数不正确");
+        if (wrongParams) {
+            System.out.println("[西门子] 收藏问答被拒：参数不正确");
         }
-        // 原样返回同一张表单说明站点根本没处理，属于静默失败。
-        return !result.body.equals(form.body);
+        return !wrongParams;
+    }
+
+    /** 收藏用的标签名。站点要求必须有标签，这里用通用技术词，不带具体产品型号。 */
+    static String favoriteTag() {
+        return "S7-1500";
+    }
+
+    /** 弹窗返回「您已经收藏过了」时说明这条已经在收藏夹里。 */
+    static boolean isAlreadyFavorited(String html) {
+        return html != null && html.contains("已经收藏过了");
     }
 
     /** 读收藏夹里的问答 ID；接口取不到时返回 null，调用方按「无法判断」处理。 */

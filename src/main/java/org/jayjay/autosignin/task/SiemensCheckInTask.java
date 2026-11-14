@@ -195,8 +195,6 @@ public class SiemensCheckInTask extends CheckInTask {
     private final Set<String> quotaLimited = new HashSet<>();
     /** 本次运行已经处理过的任务代码。 */
     private final Set<String> handled = new HashSet<>();
-    /** 最近一次使用的账号，用于定位会话文件。 */
-    private String lastUsername;
     /** 指向真实站点时才复用并保存会话，测试用的假站点不落盘。 */
     private final boolean sessionReuseEnabled;
 
@@ -305,12 +303,12 @@ public class SiemensCheckInTask extends CheckInTask {
         }
     }
 
-    /** 清掉保存的会话，返回之前是否存在。 */
-    private boolean clearSession() {
+    /** 清掉指定账号保存的会话，返回之前是否存在。 */
+    private boolean clearSession(String username) {
         if (!sessionReuseEnabled) {
             return false;
         }
-        Path file = sessionFile(lastUsername);
+        Path file = sessionFile(username);
         if (file == null) {
             return false;
         }
@@ -326,7 +324,6 @@ public class SiemensCheckInTask extends CheckInTask {
         if (StrUtil.isBlank(username)) {
             return null;
         }
-        lastUsername = username;
         String key = sha1Hex(username.trim()).substring(0, 12);
         return stateDir().resolve("siemens-session-" + key + ".txt");
     }
@@ -375,7 +372,7 @@ public class SiemensCheckInTask extends CheckInTask {
         JSONObject detail = readSignDetail();
         if (!isTrustedSignDetail(detail)) {
             // 保存的会话可能刚好过期：清掉再走一次密码登录。
-            if (clearSession()) {
+            if (clearSession(username)) {
                 System.out.println("[西门子] 保存的会话已失效，改用密码登录");
                 String failure = loginWithPassword(username, password);
                 if (failure != null) {
@@ -453,7 +450,14 @@ public class SiemensCheckInTask extends CheckInTask {
             addMessage("每日任务：", "今天已执行过，跳过");
             return;
         }
-        List<String> pending = pendingDailyTasks(readTasks());
+        JSONObject tasks = readTasks();
+        if (tasks == null) {
+            // 拿不到任务列表时不能当成「全部完成」，也不能写当天标记，留给下次重试。
+            System.out.println("[西门子] 拿不到每日任务列表，跳过本次每日任务");
+            addMessage("每日任务：", "读取任务列表失败，稍后会重试");
+            return;
+        }
+        List<String> pending = pendingDailyTasks(tasks);
         if (pending.isEmpty()) {
             System.out.println("[西门子] 每日任务已全部完成");
             markRanToday();
@@ -523,7 +527,20 @@ public class SiemensCheckInTask extends CheckInTask {
      * 故事帖提交后进入站点审核，任务状态当天不会变成已完成，只要本次提交成功就算已处理。
      */
     private void reportRemaining(String aborted) {
-        String text = remainingText(pendingDailyTasks(readTasks()),
+        JSONObject tasks = readTasks();
+        if (tasks == null) {
+            // 读不到就只报告本次执行结果，不能编造成「已全部完成」。
+            String text = aborted != null ? aborted : "已执行完毕，任务状态读取失败";
+            if (!handled.isEmpty()) {
+                text = text + "（本次已处理 " + handled.size() + " 项）";
+            }
+            if (!quotaLimited.isEmpty()) {
+                text = text + "（受站点每日主贴上限限制，明天会重试）";
+            }
+            addMessage("每日任务：", text);
+            return;
+        }
+        String text = remainingText(pendingDailyTasks(tasks),
                 handled.contains(TASK_PUBLISH_STORY), aborted);
         if (!quotaLimited.isEmpty()) {
             text = text + "（受站点每日主贴上限限制，明天会重试）";
@@ -617,11 +634,24 @@ public class SiemensCheckInTask extends CheckInTask {
 
     // ==================== 任务列表 ====================
 
-    /** 读取每日任务列表，TaskType 1 是每日任务，EventTasksStatus 2 表示已完成。 */
+    /**
+     * 读取每日任务列表，TaskType 1 是每日任务，EventTasksStatus 2 表示已完成。
+     * 网络或会话异常时返回 null，调用方必须区分「拿不到任务列表」和「任务全完成」，
+     * 否则一次接口抖动就会被误判成全部完成、当天不再重试。
+     */
     private JSONObject readTasks() {
         HttpResult result = post(supportBaseUrl + TASKS_URL,
                 "action=GetAllEventTasksByActiveType&activityType=10", signHeaders());
-        return parseObject(result.body);
+        if (result.status != 200) {
+            System.out.println("[西门子] 读取任务列表失败：HTTP " + result.status);
+            return null;
+        }
+        JSONObject body = parseObject(result.body);
+        if (body == null || body.getJSONArray("TaskList") == null) {
+            System.out.println("[西门子] 读取任务列表失败：响应不是任务列表");
+            return null;
+        }
+        return body;
     }
 
     /** 找出还没完成的每日任务代码。 */
@@ -680,10 +710,18 @@ public class SiemensCheckInTask extends CheckInTask {
 
     /** 判断某个每日任务是否已经被站点标记为完成（EventTasksStatus 2）。 */
     boolean dailyTaskCompleted(String taskCode) {
+        return taskStatus(taskCode) == Boolean.TRUE;
+    }
+
+    /**
+     * 查某个每日任务的完成状态，读不到任务列表时返回 null。
+     * 三态区分很重要：false 是「确认还没完成」，null 是「无法判断」。
+     */
+    Boolean taskStatus(String taskCode) {
         JSONObject tasks = readTasks();
         JSONArray list = tasks == null ? null : tasks.getJSONArray("TaskList");
         if (list == null) {
-            return false;
+            return null;
         }
         for (int i = 0; i < list.size(); i++) {
             JSONObject task = list.getJSONObject(i);
@@ -691,7 +729,7 @@ public class SiemensCheckInTask extends CheckInTask {
                 return task.getInt("EventTasksStatus", 0) == 2;
             }
         }
-        return false;
+        return null;
     }
 
     // ==================== 风控 ====================
@@ -729,6 +767,11 @@ public class SiemensCheckInTask extends CheckInTask {
      */
     void markTaskSkipped() {
         lastTaskSkipped = true;
+    }
+
+    /** 本次任务是否被站点额度挡下，供动作类决定日志措辞。 */
+    boolean wasTaskSkipped() {
+        return lastTaskSkipped;
     }
 
     // ==================== 签到与抽奖 ====================
@@ -1547,6 +1590,19 @@ public class SiemensCheckInTask extends CheckInTask {
                         .append('\n');
             }
             Files.write(file, text.toString().getBytes(StandardCharsets.UTF_8));
+            restrictPermissions(file);
+        }
+
+        /** 文件里是明文会话凭证，尽量只让当前用户可读。 */
+        private static void restrictPermissions(Path file) {
+            try {
+                Set<java.nio.file.attribute.PosixFilePermission> ownerOnly =
+                        java.util.EnumSet.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+                Files.setPosixFilePermissions(file, ownerOnly);
+            } catch (Exception e) {
+                // 非 POSIX 文件系统（比如 Windows 本地调试）不支持就算了，不影响功能。
+            }
         }
 
         /** 从文件读回 cookie；文件不存在或格式不对时返回 false。 */

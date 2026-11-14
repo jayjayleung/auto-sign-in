@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 public class SiemensCheckInTaskTest {
@@ -47,6 +48,8 @@ public class SiemensCheckInTaskTest {
     private final AtomicInteger tasksLeft = new AtomicInteger();
     /** 发帖被站点拒绝时置位，模拟「请选择帖子类别」。 */
     private volatile boolean rejectPost;
+    /** 任务列表接口不可用时置位，模拟接口故障。 */
+    private volatile boolean tasksUnreadable;
 
     @Before
     public void setUp() throws IOException {
@@ -62,6 +65,7 @@ public class SiemensCheckInTaskTest {
         signedNow = false;
         tasksLeft.set(0);
         rejectPost = false;
+        tasksUnreadable = false;
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/MySupport/index.aspx", this::handleIndex);
         server.createContext("/frontend/login", this::handleLoginPage);
@@ -218,6 +222,20 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void detectsAlreadyFavoritedQuestion() {
+        // 弹窗对已收藏问答返回「您已经收藏过了」，不能当成可提交表单重复提交。
+        assertTrue(SiemensAnswerActions.isAlreadyFavorited("<div>您已经收藏过了！<a>查看我的收藏夹</a></div>"));
+        assertFalse(SiemensAnswerActions.isAlreadyFavorited("<form id=\"form1\"><input name=\"tagSave\"></form>"));
+        assertFalse(SiemensAnswerActions.isAlreadyFavorited(null));
+    }
+
+    @Test
+    public void favoriteAlwaysCarriesTag() {
+        // 站点要求收藏必须带标签，不带标签只会原样返回表单、不报错也不生效。
+        assertFalse(SiemensAnswerActions.favoriteTag().trim().isEmpty());
+    }
+
+    @Test
     public void recognizesNewUserPostQuotaMessage() {
         // 新注册账号当日主贴上限，站点文案是「新注册用户当日主贴数量不能超过2个」。
         assertTrue(SiemensForumActions.isQuotaLimited("新注册用户当日主贴数量不能超过2个，请稍候重试！"));
@@ -255,12 +273,14 @@ public class SiemensCheckInTaskTest {
         assertFalse(title.trim().isEmpty());
         assertFalse(body.trim().isEmpty());
         assertEquals(null, task.fallbackContent("unknown-kind"));
-        // 同一次运行内重复取会换一条，避免帖子标题和正文撞车。
+        // 同一次运行内重复取会换一条，避免同轮多个帖子用同一个标题。
         String second = task.fallbackContent("posttitle");
-        assertEquals(title.equals(second), TITLE_POOL_SIZE == 1);
+        assertNotEquals(title, second);
+        // 连取一轮后仍要能取到内容，不会因为计数越界而返回 null。
+        for (int i = 0; i < 10; i++) {
+            assertFalse(task.fallbackContent("posttitle").trim().isEmpty());
+        }
     }
-
-    private static final int TITLE_POOL_SIZE = 4;
 
     @Test
     public void detectsCaptchaAndThrottleCodes() {
@@ -309,6 +329,49 @@ public class SiemensCheckInTaskTest {
 
         assertEquals("签到结果：签到成功\n已签到：4 天\n西币：88（本次 +0）", plainText(task));
         assertEquals(1, signActions.get());
+    }
+
+    @Test
+    public void reportsStoryPostFailureInsteadOfAllDone() throws Exception {
+        tasksLeft.set(1);
+        rejectPost = true;
+        Map<String, String> environment = environment();
+        environment.put("SIEMENS_DAILY_TASKS", "true");
+        SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
+        try {
+            task.run();
+            String text = plainText(task);
+            // 故事帖被站点拒绝时不能报「已全部完成」，必须照实列出未完成。
+            assertTrue("应报未完成，实际：" + text, text.contains("未完成 [论坛发故事帖]"));
+            assertFalse("不能报已全部完成，实际：" + text, text.contains("已全部完成"));
+        } finally {
+            clearRunMarker();
+        }
+    }
+
+    @Test
+    public void doesNotClaimAllDoneWhenTaskListUnreadable() throws Exception {
+        tasksUnreadable = true;
+        Map<String, String> environment = environment();
+        environment.put("SIEMENS_DAILY_TASKS", "true");
+        SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
+        try {
+            task.run();
+            String text = plainText(task);
+            // 拿不到任务列表时既不能报「已全部完成」，也不能写当天标记。
+            assertFalse("不能报已全部完成，实际：" + text, text.contains("已全部完成"));
+            assertTrue("应说明读取失败，实际：" + text, text.contains("读取任务列表失败"));
+        } finally {
+            clearRunMarker();
+            tasksUnreadable = false;
+        }
+    }
+
+    /** 清掉当天「已执行」标记，避免测试之间互相影响。 */
+    private static void clearRunMarker() throws Exception {
+        java.nio.file.Path marker = SiemensCheckInTask.stateDir().resolve("siemens-ran-"
+                + SiemensCheckInTask.sha1Hex("user@example.com").substring(0, 12) + ".txt");
+        java.nio.file.Files.deleteIfExists(marker);
     }
 
     @Test
@@ -477,6 +540,10 @@ public class SiemensCheckInTaskTest {
     }
 
     private void handleTasks(HttpExchange exchange) throws IOException {
+        if (tasksUnreadable) {
+            write(exchange, 500, "upstream error", "text/plain; charset=utf-8");
+            return;
+        }
         int left = tasksLeft.get();
         StringBuilder tasks = new StringBuilder();
         tasks.append("{\"TaskType\":1,\"EventTasksStatus\":2,\"TaskName\":\"NewMySupport_SignIn\"}");
