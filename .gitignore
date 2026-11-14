@@ -22,6 +22,8 @@ target/
 .env*
 !.env.example
 docker-compose.yml
+# 容器持久化目录：会话文件、每日任务去重标记
+state/
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
