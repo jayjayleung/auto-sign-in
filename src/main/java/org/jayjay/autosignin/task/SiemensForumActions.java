@@ -23,7 +23,14 @@ final class SiemensForumActions {
     /** 故事帖走「谈天说地」版区和对应子分类。 */
     private static final String STORY_BOARD_ID = "25";
     private static final String STORY_SORT_ID = "123";
+    /**
+     * 探讨帖的子分类（帖子类型）。S7-1500 版区要求必须选一个，不传会被拒「请选择帖子类别」。
+     * 85 是「通信」。
+     */
+    private static final String DISCUSS_SORT_ID = "85";
     private static final String GROUP = "forum";
+    /** 站点返回的「帖子类型」下拉项，value 是类别 ID。 */
+    private static final Pattern SORT_OPTION = Pattern.compile("<option\\s+value=\"(\\d+)\"\\s*>([^<]*)</option>");
 
     private final SiemensCheckInTask task;
 
@@ -70,7 +77,7 @@ final class SiemensForumActions {
         if (StrUtil.isBlank(content)) {
             return;
         }
-        submitPost(articleId, boardId, TYPE_DISCUSS, "回复：升级选型讨论", content);
+        submitPost(articleId, boardId, TYPE_DISCUSS, "回复：升级选型讨论", content, "0");
     }
 
     /** 评论最新帖子。 */
@@ -89,7 +96,7 @@ final class SiemensForumActions {
         }
         String url = task.supportBaseUrl() + "/club/bbs/bbsGeneric.ashx?action=AddEvaluate"
                 + "&aid=" + articleId + "&bid=" + boardId
-                + "&author=" + authorOf(articleId) + "&content=" + SiemensCheckInTask.encode(content)
+                + "&author=" + authorOf(articleId, boardId) + "&content=" + SiemensCheckInTask.encode(content)
                 + "&uid=" + task.currentUserId();
         task.waitBeforeSubmit(GROUP);
         SiemensCheckInTask.HttpResult result = task.post(url, "", task.supportHeaders(url));
@@ -108,7 +115,7 @@ final class SiemensForumActions {
         if (StrUtil.isBlank(title) || StrUtil.isBlank(content)) {
             return;
         }
-        submitPost("0", BOARD_ID, TYPE_DISCUSS, SiemensCheckInTask.cleanTitle(title), content);
+        submitPost("0", BOARD_ID, TYPE_DISCUSS, SiemensCheckInTask.cleanTitle(title), content, discussSortId());
     }
 
     /** 发一条故事帖。故事帖要站点审核，提交后不会立即计入任务。 */
@@ -131,11 +138,32 @@ final class SiemensForumActions {
         System.out.println("[西门子] 发故事帖" + (ok ? "成功，等待审核" : "失败"));
     }
 
-    private void submitPost(String articleId, String boardId, String type, String title, String content) {
+    private void submitPost(String articleId, String boardId, String type, String title,
+                            String content, String sort) {
         task.waitBeforeSubmit(GROUP);
-        JSONObject request = buildRequest(articleId, boardId, type, title, content, "0");
+        JSONObject request = buildRequest(articleId, boardId, type, title, content, sort);
         boolean ok = commit(request);
         System.out.println("[西门子] 发帖" + (ok ? "成功" : "失败"));
+    }
+
+    /**
+     * 取探讨帖要用的子分类 ID。站点按版区下发可选项，取第一个避免硬编码失效；
+     * 拿不到时退回「通信」。
+     */
+    private String discussSortId() {
+        String url = task.supportBaseUrl() + "/club/bbs/bbsGeneric.ashx?action=SendSort&bid=" + BOARD_ID;
+        SiemensCheckInTask.HttpResult result = task.get(url);
+        String sortId = sortIdFrom(result.body);
+        return StrUtil.blankToDefault(sortId, DISCUSS_SORT_ID);
+    }
+
+    /** 从「帖子类型」下拉里取第一个类别 ID，取不到返回 null。 */
+    static String sortIdFrom(String html) {
+        if (StrUtil.isBlank(html)) {
+            return null;
+        }
+        Matcher matcher = SORT_OPTION.matcher(html);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private JSONObject buildRequest(String articleId, String boardId, String type,
@@ -169,11 +197,22 @@ final class SiemensForumActions {
         JSONObject head = body == null ? null : body.getJSONObject("Head");
         boolean ok = head != null && Boolean.TRUE.equals(head.getBool("Ret"));
         if (!ok) {
-            System.out.println("[西门子] 发帖被拒绝：" + (head == null
-                    ? SiemensCheckInTask.abbreviate(result.body) : head.getStr("Message")));
+            String message = head == null
+                    ? SiemensCheckInTask.abbreviate(result.body) : head.getStr("Message");
+            System.out.println("[西门子] 发帖被拒绝：" + message);
+            // 新注册账号每天有主贴数上限，这不是程序问题，也不该触发风控熔断。
+            if (isQuotaLimited(message)) {
+                task.markTaskSkipped();
+                return false;
+            }
         }
         task.markTaskFailed(!ok);
         return ok;
+    }
+
+    /** 站点对当日主贴数量超限的提示，属于账号限制而不是程序失败。 */
+    static boolean isQuotaLimited(String message) {
+        return message != null && message.contains("主贴数量");
     }
 
     /** 从「最新发帖」列表取一条帖子，返回 articleId-boardId。 */
@@ -186,9 +225,9 @@ final class SiemensForumActions {
         return matcher.find() ? matcher.group(1) + "-" + matcher.group(2) : null;
     }
 
-    private String authorOf(String articleId) {
+    private String authorOf(String articleId, String boardId) {
         SiemensCheckInTask.Page page = task.follow(
-                task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + BOARD_ID + "_0_1.html");
+                task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
         if (page == null) {
             return "";
         }

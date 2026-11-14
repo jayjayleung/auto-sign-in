@@ -70,6 +70,94 @@ public class SiemensCheckInTask extends CheckInTask {
     private static final Pattern USER_ID_PATTERN = Pattern.compile("userId\\s*=\\s*(\\d+)");
     private static final Pattern COIN_IN_TEXT = Pattern.compile("(\\d+)\\s*西币");
 
+    /** AI 助手不可用时的兜底文案，按天轮换。 */
+    private static final String[] POST_TITLES = {
+            "S7-1500 与 PROFINET 组网经验交流",
+            "1500 做 PN 通讯的几个坑",
+            "S7-1500 从站掉站处理分享",
+            "1500 与变频器 PN 通讯调试小结",
+    };
+    private static final String[] POST_BODIES = {
+            "最近在做一条线的 PN 组网，主站用 1516，带了十几个 ET200 和几个 G120。"
+                    + "分享几点：设备名一定要在上线前统一规划，别现场临时起名；"
+                    + "拓扑视图能对上实物会省很多排查时间；换端口或者换交换机后记得重新校验。"
+                    + "有类似场景的可以一起交流下经验。",
+            "S7-1500 走 PROFINET 的时候，比较容易被忽略的是更新时间设置。"
+                    + "站多的时候把更新时间调得过短，反而容易出现丢站或者报警。"
+                    + "我们做法是按实际工艺节拍给，别一味追求快。另外交换机上最好把 PN 口和办公网分开。",
+            "遇到过 1500 从站偶发掉站，最后查到是网线屏蔽没做好，和柜内变频器走线太近。"
+                    + "换屏蔽网线、分开桥架之后就稳定了。提醒大家布线阶段就把 PN 线和动力线分开。",
+            "1516 带 PN 从站，现场调试时习惯先在拓扑视图里对一遍实际接线，"
+                    + "能提前发现端口接错。设备名用 TIA 里的功能批量分配，比一个个点快很多。"
+                    + "改完组态记得重新下载硬件，不然诊断信息会对不上。",
+    };
+    private static final String[] STORY_TITLES = {
+            "记一次夜班抢修",
+            "第一次独立调试",
+            "现场那根接错的网线",
+            "通宵调变频的那晚",
+    };
+    private static final String[] STORY_BODIES = {
+            "刚入行那年跟着师傅做一个包装线的改造。晚上十点多产线突然全停，上位机全是通讯报警。"
+                    + "师傅让我先看交换机的灯，果然有一个口在闪黄。顺着线查过去，是白天施工碰松的一根 PN 线。"
+                    + "重新压好水晶头，重启从站就恢复了。那晚我记住了：先看物理层，别急着翻程序。",
+            "第一次独立负责一条小线的调试，压力挺大。开机后有两个从站一直起不来，"
+                    + "我把设备名、IP、拓扑挨个对了一遍，发现是其中一个模块的固件版本和组态不一致。"
+                    + "升级固件重新下载之后全部正常。这件事让我养成了先核对版本再排查逻辑的习惯。",
+            "有条老线换控制器，图纸上标的是 A 柜到 B 柜一根网线，实际现场接成了两根中间过交换机。"
+                    + "结果拓扑死活对不上，报警一直消不掉。后来顺着桥架一根根摸，才发现多了个交换机。"
+                    + "补进拓扑之后一次就过了。现场永远比图纸复杂，动手前先走一遍线。",
+            "调试一条新线到凌晨三点，变频器一直报通讯超时。改了更新时间、换了网线都没用。"
+                    + "最后发现是有一台设备的设备名和另一台重名，两台轮流上线。"
+                    + "改完名字整个世界都安静了。回去路上天都亮了，但那次的教训一直记着。",
+    };
+    private static final String[] ASK_TITLES = {
+            "S7-1500 与第三方 PN 设备通讯超时",
+            "1516 带 PN 从站偶发掉站",
+            "S7-1500 组态里设备名如何批量分配",
+            "1500 通过 PN 读取变频器参数异常",
+    };
+    private static final String[] ASK_BODIES = {
+            "项目里用 1516 主站带一台第三方 PROFINET 设备，组态里能识别到设备，"
+                    + "但在线诊断提示通讯超时。更新时间和看门狗都按手册设过，网线也换过。"
+                    + "想请教一下这类情况一般先查哪些点？",
+            "一条线上 1516 带了十几个 ET200 从站，运行几小时后偶尔有一两个掉站，重新上电就恢复。"
+                    + "交换机是管理型的，暂时没看到明显错误包。这种情况一般是布线问题还是更新时间设置问题？",
+            "S7-1500 的组态里要分配几十个从站的设备名，目前是一个个点开改，效率很低。"
+                    + "想确认一下有没有批量分配或者在线的批量改法，用 TIA 哪个版本比较稳？",
+            "用 1500 通过 PROFINET 读变频器参数，个别参数读回来是 0 或者异常值，"
+                    + "但同一台变频器用面板看是正常的。报文是标准报文，组态也核对过。"
+                    + "想请教下一般是什么原因？",
+    };
+    private static final String[] REPLIES = {
+            "我们厂去年也做过类似的改造，经验是先把 DP 从站保留，用 CM 1542-5 过渡，"
+                    + "按工位分批换，别整线一次停。程序和画面分两次下装，出问题好回退。",
+            "补充一条：换型时把原来的符号表和注释一起整理好，后面接手的人能省很多时间。"
+                    + "备件也要提前确认交期，老模块现在越来越难买。",
+            "选型上建议先算一下 IO 点数的增长余量，别只按现在的需求配。"
+                    + "我们当时就是点数不够又补了一块模块，柜内空间差点放不下。",
+    };
+    private static final String[] POST_COMMENTS = {
+            "这个思路挺实用的，现场调试时确实能少走弯路。",
+            "同意，先看物理层再查程序，能省一半时间。",
+            "感谢分享，正好最近在做类似的项目，参考价值很大。",
+    };
+    private static final String[] BEST_COMMENTS = {
+            "补充一点现场经验：同样的配置最好在样机上先跑一遍，把报警码记下来，现场再遇到能省不少时间。",
+            "按这个思路处理过一次，确实有效。另外建议把诊断缓冲区一起看，能更快定位到第一现场。",
+            "这个方法我们也用过，补充一条：改完组态记得重新下载硬件，否则诊断信息会对不上。",
+    };
+    private static final String[] ANSWERS = {
+            "建议先确认硬件组态和实际模块型号、固件版本是否一致，再检查 PROFINET 设备名是否分配正确。"
+                    + "如果在线诊断能看到设备但通讯不上，先看是否在同一个网段、是否有 IP 冲突，"
+                    + "再逐台核对拓扑和端口设置，一般就能定位到问题点。",
+            "这种情况一般先看三层：物理层（网线、屏蔽、走线是否和动力线分开）、"
+                    + "设备名和 IP 分配（有没有重名或残留）、以及更新时间设置是否过短。"
+                    + "顺序建议从物理层开始，排查起来最快。",
+            "可以在 TIA 的在线访问里用「分配设备名」的功能批量处理，比逐个点开快很多。"
+                    + "前提是拓扑视图和实物接线一致，组态下载后再统一分配一次，基本能一次过。",
+    };
+
     /** 每日任务的稳定代码，站点改中文名或增删任务时这里才需要跟着改。 */
     static final String TASK_SIGN_IN = "NewMySupport_SignIn";
     static final String TASK_ASK = "NewMySupport_FAQuestion";
@@ -92,10 +180,25 @@ public class SiemensCheckInTask extends CheckInTask {
 
     private String currentUserId = "";
     private String cachedAiToken;
+    /**
+     * AI 助手不可用时置位（要验证码、超时等）。置位后本次运行不再重试登录，
+     * 改用内置文案兜底，避免一次 AI 故障把整轮每日任务带崩。
+     */
+    private boolean aiUnavailable;
+    /** 兜底文案每种类型已经用过几次，用来在同一次运行内换着取，避免重复。 */
+    private final Map<String, Integer> fallbackUses = new HashMap<>();
     private int consecutiveFailures;
     private boolean lastTaskFailed;
+    /** 本次任务被站点额度挡住，既不算成功也不算失败。 */
+    private boolean lastTaskSkipped;
+    /** 被额度挡下的任务，通知里单独说明，避免误报成「已提交待审核」。 */
+    private final Set<String> quotaLimited = new HashSet<>();
     /** 本次运行已经处理过的任务代码。 */
     private final Set<String> handled = new HashSet<>();
+    /** 最近一次使用的账号，用于定位会话文件。 */
+    private String lastUsername;
+    /** 指向真实站点时才复用并保存会话，测试用的假站点不落盘。 */
+    private final boolean sessionReuseEnabled;
 
     public SiemensCheckInTask() {
         this(System.getenv(), DEFAULT_SUPPORT_BASE_URL, true);
@@ -111,37 +214,12 @@ public class SiemensCheckInTask extends CheckInTask {
         this.entryUrl = this.supportBaseUrl + "/MySupport/index.aspx";
         this.signUrl = this.supportBaseUrl + "/MySupport/AjaxAPI/SignInAjax.ashx";
         this.dailyTasksByDefault = dailyTasksByDefault;
+        // 只有指向真实站点的实例才复用会话；测试用的本地假站点不落盘，避免相互串会话。
+        this.sessionReuseEnabled = DEFAULT_SUPPORT_BASE_URL.equals(this.supportBaseUrl);
     }
 
-    @Override
-    public NotificationSection buildNotificationSection() {
-        return new NotificationSection("西门子签到", messageBlocks);
-    }
-
-    @Override
-    public CheckInTask run() {
-        try {
-            System.out.println("[西门子] 签到任务开始");
-            String username = environment == null ? null : environment.get(USERNAME_KEY);
-            String password = environment == null ? null : environment.get(PASSWORD_KEY);
-            if (StrUtil.isBlank(username) || StrUtil.isBlank(password)) {
-                System.out.println("[西门子] 用户名或密码未配置，跳过签到");
-                enabled = false;
-                return this;
-            }
-            String failure = execute(username.trim(), password);
-            if (failure != null) {
-                addMessage("签到失败：", failure);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            addMessage("西门子签到失败，请查看日志");
-        }
-        System.out.println("[西门子] 签到任务结束");
-        return this;
-    }
-
-    private String execute(String username, String password) {
+    /** 用账号密码走一遍 ONEID 登录流程；成功返回 null，失败返回原因。 */
+    private String loginWithPassword(String username, String password) {
         System.out.println("[西门子] 打开登录页");
         Page loginPage = follow(entryUrl);
         if (loginPage == null || !isOneIdLoginPage(loginPage.body)) {
@@ -180,11 +258,137 @@ public class SiemensCheckInTask extends CheckInTask {
         if (landed == null || isOneIdLoginPage(landed.body)) {
             return "登录后仍停在登录页";
         }
+        return null;
+    }
+
+    // ==================== 会话复用 ====================
+
+    /**
+     * 尝试用上次保存的 cookie 恢复会话。
+     * 会话 cookie 本身带过期时间，所以这里只关心站点是否还认这个登录态。
+     */
+    private boolean tryRestoreSession(String username) {
+        if (!sessionReuseEnabled) {
+            return false;
+        }
+        Path file = sessionFile(username);
+        if (file == null || !Files.exists(file)) {
+            return false;
+        }
+        cookies.clear();
+        boolean loaded;
+        try {
+            loaded = cookies.load(file);
+        } catch (Exception e) {
+            return false;
+        }
+        if (!loaded) {
+            return false;
+        }
+        Page page = follow(entryUrl);
+        return page != null && !isOneIdLoginPage(page.body) && USER_ID_PATTERN.matcher(page.body).find();
+    }
+
+    private void saveSession(String username) {
+        if (!sessionReuseEnabled) {
+            return;
+        }
+        Path file = sessionFile(username);
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            cookies.save(file);
+        } catch (Exception e) {
+            // 保存失败只影响下次复用，不影响本次执行。
+        }
+    }
+
+    /** 清掉保存的会话，返回之前是否存在。 */
+    private boolean clearSession() {
+        if (!sessionReuseEnabled) {
+            return false;
+        }
+        Path file = sessionFile(lastUsername);
+        if (file == null) {
+            return false;
+        }
+        try {
+            return Files.deleteIfExists(file);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 会话文件按账号区分，多个账号在同一容器里不会互相覆盖。 */
+    private Path sessionFile(String username) {
+        if (StrUtil.isBlank(username)) {
+            return null;
+        }
+        lastUsername = username;
+        String key = sha1Hex(username.trim()).substring(0, 12);
+        return stateDir().resolve("siemens-session-" + key + ".txt");
+    }
+
+    @Override
+    public NotificationSection buildNotificationSection() {
+        return new NotificationSection("西门子签到", messageBlocks);
+    }
+
+    @Override
+    public CheckInTask run() {
+        try {
+            System.out.println("[西门子] 签到任务开始");
+            String username = environment == null ? null : environment.get(USERNAME_KEY);
+            String password = environment == null ? null : environment.get(PASSWORD_KEY);
+            if (StrUtil.isBlank(username) || StrUtil.isBlank(password)) {
+                System.out.println("[西门子] 用户名或密码未配置，跳过签到");
+                enabled = false;
+                return this;
+            }
+            String failure = execute(username.trim(), password);
+            if (failure != null) {
+                addMessage("签到失败：", failure);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            addMessage("西门子签到失败，请查看日志");
+        }
+        System.out.println("[西门子] 签到任务结束");
+        return this;
+    }
+
+    private String execute(String username, String password) {
+        // 优先复用上次保存的会话，避免每次都密码登录把账号打到要图形验证码。
+        if (tryRestoreSession(username)) {
+            System.out.println("[西门子] 复用上次的登录会话");
+        } else {
+            String failure = loginWithPassword(username, password);
+            if (failure != null) {
+                return failure;
+            }
+            saveSession(username);
+        }
 
         System.out.println("[西门子] 查询签到状态");
         JSONObject detail = readSignDetail();
         if (!isTrustedSignDetail(detail)) {
-            return "登录后没有进入支持中心";
+            // 保存的会话可能刚好过期：清掉再走一次密码登录。
+            if (clearSession()) {
+                System.out.println("[西门子] 保存的会话已失效，改用密码登录");
+                String failure = loginWithPassword(username, password);
+                if (failure != null) {
+                    return failure;
+                }
+                saveSession(username);
+                detail = readSignDetail();
+                if (!isTrustedSignDetail(detail)) {
+                    return "登录后没有进入支持中心";
+                }
+            } else {
+                return "登录后没有进入支持中心";
+            }
         }
         String result = "今日已签到";
         if (!Boolean.TRUE.equals(detail.getBool("TodayHaveSign"))) {
@@ -259,8 +463,10 @@ public class SiemensCheckInTask extends CheckInTask {
         SiemensForumActions forum = new SiemensForumActions(this);
         SiemensAnswerActions answer = new SiemensAnswerActions(this);
         String questionId = null;
+        String aborted = null;
         for (String code : pending) {
             lastTaskFailed = false;
+            lastTaskSkipped = false;
             try {
                 // 按任务代码分发，中文名和排序随时会被站点调整。
                 if (TASK_COLLECT_QUESTION.equals(code)) {
@@ -293,32 +499,68 @@ public class SiemensCheckInTask extends CheckInTask {
                 consecutiveFailures++;
                 if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                     System.out.println("[西门子] 连续失败 " + consecutiveFailures + " 次，停止剩余任务，避免触发风控");
-                    addMessage("每日任务：", "连续失败 " + consecutiveFailures + " 次，已中止");
-                    return;
+                    aborted = "连续失败 " + consecutiveFailures + " 次，已中止";
+                    break;
                 }
+            } else if (lastTaskSkipped) {
+                // 额度受限不是失败，但也不能算已完成：重置熔断计数并单独记录。
+                consecutiveFailures = 0;
+                quotaLimited.add(code);
             } else {
                 consecutiveFailures = 0;
                 handled.add(code);
             }
         }
-        List<String> left = pendingDailyTasks(readTasks());
-        markRanToday();
-        // 故事帖提交后进入站点审核，任务状态当天不会变成已完成，但已经算处理过了。
-        boolean submittedStory = handled.contains(TASK_PUBLISH_STORY);
-        left.remove(TASK_PUBLISH_STORY);
-        if (left.isEmpty()) {
-            addMessage("每日任务：", submittedStory ? "已全部完成，故事帖待审核" : "已全部完成");
-        } else {
-            List<String> names = new ArrayList<>();
-            for (String code : left) {
-                names.add(taskDisplayName(code));
-            }
-            String text = "未完成 " + names;
-            if (submittedStory) {
-                text = text + "（故事帖已提交，待审核）";
-            }
-            addMessage("每日任务：", text);
+        // 中止时不写「今天已执行」标记，留出后续重试的机会；已完成的项站点会标记，重跑不会重复发。
+        if (aborted == null) {
+            markRanToday();
         }
+        reportRemaining(aborted);
+    }
+
+    /**
+     * 重新读任务列表，把没做的项写进通知。
+     * 故事帖提交后进入站点审核，任务状态当天不会变成已完成，只要本次提交成功就算已处理。
+     */
+    private void reportRemaining(String aborted) {
+        String text = remainingText(pendingDailyTasks(readTasks()),
+                handled.contains(TASK_PUBLISH_STORY), aborted);
+        if (!quotaLimited.isEmpty()) {
+            text = text + "（受站点每日主贴上限限制，明天会重试）";
+        }
+        addMessage("每日任务：", text);
+    }
+
+    /**
+     * 把剩余任务拼成通知文案。
+     * 只有本次确实提交成功的故事帖才算已处理，失败时仍要出现在未完成列表里。
+     */
+    static String remainingText(List<String> pending, boolean submittedStory, String aborted) {
+        List<String> left = new ArrayList<>(pending == null ? new ArrayList<>() : pending);
+        if (submittedStory) {
+            left.remove(TASK_PUBLISH_STORY);
+        }
+        List<String> names = new ArrayList<>();
+        for (String code : left) {
+            names.add(taskDisplayName(code));
+        }
+        if (names.isEmpty() && aborted == null) {
+            return submittedStory ? "已全部完成，故事帖待审核" : "已全部完成";
+        }
+        StringBuilder text = new StringBuilder();
+        if (aborted != null) {
+            // 中止时也要把剩余项列清楚，否则看不出到底卡在哪。
+            text.append(aborted);
+            if (!names.isEmpty()) {
+                text.append("，未完成 ").append(names);
+            }
+        } else {
+            text.append("未完成 ").append(names);
+        }
+        if (submittedStory) {
+            text.append("（故事帖已提交，待审核）");
+        }
+        return text.toString();
     }
 
     /**
@@ -436,6 +678,22 @@ public class SiemensCheckInTask extends CheckInTask {
         }
     }
 
+    /** 判断某个每日任务是否已经被站点标记为完成（EventTasksStatus 2）。 */
+    boolean dailyTaskCompleted(String taskCode) {
+        JSONObject tasks = readTasks();
+        JSONArray list = tasks == null ? null : tasks.getJSONArray("TaskList");
+        if (list == null) {
+            return false;
+        }
+        for (int i = 0; i < list.size(); i++) {
+            JSONObject task = list.getJSONObject(i);
+            if (task != null && taskCode.equals(task.getStr("TaskName"))) {
+                return task.getInt("EventTasksStatus", 0) == 2;
+            }
+        }
+        return false;
+    }
+
     // ==================== 风控 ====================
 
     /** 同类提交间隔不足 2 分钟时先等待，避免被判「短时间内多次发帖」。 */
@@ -463,6 +721,14 @@ public class SiemensCheckInTask extends CheckInTask {
 
     void markTaskFailed(boolean failed) {
         lastTaskFailed = failed;
+    }
+
+    /**
+     * 标记本次任务被站点额度挡下：既不算成功也不能算失败。
+     * 通知里要照实列为未完成，但不要触发连续失败熔断。
+     */
+    void markTaskSkipped() {
+        lastTaskSkipped = true;
     }
 
     // ==================== 签到与抽奖 ====================
@@ -556,13 +822,25 @@ public class SiemensCheckInTask extends CheckInTask {
 
     // ==================== AI 生成 ====================
 
-    /** 生成内容并和上次发过的内容比对，太像就重写一次。 */
+    /** 生成内容并和上次发过的内容比对，太像就重写一次。AI 不可用时用内置文案兜底。 */
     String generateUnique(String prompt, String kind) {
         String previous = loadLastContent(kind);
-        String content = generateWithAi(prompt, previous);
+        String content = null;
+        try {
+            content = generateWithAi(prompt, previous);
+        } catch (RuntimeException e) {
+            // AI 侧网络抖动或超时不该让整条任务失败，标记后直接用兜底文案。
+            System.out.println("[西门子] AI 生成异常：" + e.getMessage() + "，改用内置文案");
+            aiUnavailable = true;
+        }
         if (StrUtil.isBlank(content)) {
-            lastTaskFailed = true;
-            return null;
+            content = fallbackContent(kind);
+            if (StrUtil.isBlank(content)) {
+                lastTaskFailed = true;
+                return null;
+            }
+            System.out.println("[西门子] " + kind + " 使用内置文案");
+            return content;
         }
         if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD) {
             System.out.println("[西门子] " + kind + "内容与上次过于接近，重写一次");
@@ -575,10 +853,63 @@ public class SiemensCheckInTask extends CheckInTask {
         return content;
     }
 
+    /**
+     * 内置兜底文案，只在 AI 助手不可用时使用。
+     * 用「当天序号 + 账号哈希 + 第几次取用」选条目，避免多个账号同一天发出同样的内容。
+     */
+    String fallbackContent(String kind) {
+        if (kind == null) {
+            return null;
+        }
+        switch (kind) {
+            case "posttitle":
+                return pick(POST_TITLES, kind);
+            case "postbody":
+                return pick(POST_BODIES, kind);
+            case "storytitle":
+                return pick(STORY_TITLES, kind);
+            case "storybody":
+                return pick(STORY_BODIES, kind);
+            case "asktitle":
+                return pick(ASK_TITLES, kind);
+            case "askbody":
+                return pick(ASK_BODIES, kind);
+            case "reply":
+                return pick(REPLIES, kind);
+            case "postcomment":
+                return pick(POST_COMMENTS, kind);
+            case "bestcomment":
+                return pick(BEST_COMMENTS, kind);
+            case "answer":
+                return pick(ANSWERS, kind);
+            default:
+                return null;
+        }
+    }
+
+    private String pick(String[] pool, String kind) {
+        if (pool == null || pool.length == 0) {
+            return null;
+        }
+        Integer used = fallbackUses.get(kind);
+        int next = used == null ? 0 : used;
+        fallbackUses.put(kind, next + 1);
+        String username = environment == null ? null : environment.get(USERNAME_KEY);
+        int seed = LocalDate.now().getDayOfYear();
+        if (StrUtil.isNotBlank(username)) {
+            seed += Math.abs(username.trim().hashCode() % 97);
+        }
+        return pool[(seed + next) % pool.length];
+    }
+
     /** 每次请求带上当天日期和随机角度，避免连续几天生成雷同内容。 */
     String generateWithAi(String prompt, String avoid) {
+        if (aiUnavailable) {
+            return null;
+        }
         String token = mallAccessToken();
         if (StrUtil.isBlank(token)) {
+            aiUnavailable = true;
             return null;
         }
         String varied = prompt + "\n（今天是 " + LocalDate.now() + "，请换一个与以往不同的角度和说法"
@@ -613,7 +944,9 @@ public class SiemensCheckInTask extends CheckInTask {
                 headers, AI_TIMEOUT_MILLIS);
         JSONObject body = parseObject(result.body);
         if (body == null) {
-            System.out.println("[西门子] AI 助手 HTTP " + result.status);
+            // 超时或网关异常：本次运行不再依赖 AI，后面直接用兜底文案。
+            System.out.println("[西门子] AI 助手 HTTP " + result.status + "，改用内置文案");
+            aiUnavailable = true;
             return null;
         }
         String answer = body.getStr("Ans");
@@ -646,6 +979,8 @@ public class SiemensCheckInTask extends CheckInTask {
         JSONObject body = login(page.url, appId, flowId, username.trim(), password);
         if (!isLoginSuccess(body)) {
             System.out.println("[西门子] AI 助手登录失败：" + describeLoginFailure(body));
+            // 密码接口要图形验证码或触发频率限制时，继续重试只会加重风控，直接放弃 AI。
+            aiUnavailable = true;
             return null;
         }
         JSONObject data = body.getJSONObject("data");
@@ -1197,6 +1532,61 @@ public class SiemensCheckInTask extends CheckInTask {
 
         private static String stripDot(String domain) {
             return domain.startsWith(".") ? domain.substring(1) : domain;
+        }
+
+        /** 把当前 cookie 写到文件，下次运行不必再密码登录。 */
+        void save(Path file) throws java.io.IOException {
+            StringBuilder text = new StringBuilder();
+            for (StoredCookie cookie : cookies) {
+                text.append(cookie.name).append('\t')
+                        .append(cookie.value).append('\t')
+                        .append(cookie.domain).append('\t')
+                        .append(cookie.path).append('\t')
+                        .append(cookie.hostOnly ? '1' : '0').append('\t')
+                        .append(cookie.secure ? '1' : '0')
+                        .append('\n');
+            }
+            Files.write(file, text.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        /** 从文件读回 cookie；文件不存在或格式不对时返回 false。 */
+        boolean load(Path file) {
+            List<String> lines;
+            try {
+                lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                return false;
+            }
+            List<StoredCookie> restored = new ArrayList<>();
+            for (String line : lines) {
+                if (StrUtil.isBlank(line)) {
+                    continue;
+                }
+                String[] parts = line.split("\t", -1);
+                if (parts.length < 6) {
+                    continue;
+                }
+                StoredCookie cookie = new StoredCookie();
+                cookie.name = parts[0];
+                cookie.value = parts[1];
+                cookie.domain = parts[2];
+                cookie.path = parts[3];
+                cookie.hostOnly = "1".equals(parts[4]);
+                cookie.secure = "1".equals(parts[5]);
+                if (StrUtil.isNotBlank(cookie.name)) {
+                    restored.add(cookie);
+                }
+            }
+            if (restored.isEmpty()) {
+                return false;
+            }
+            cookies.clear();
+            cookies.addAll(restored);
+            return true;
+        }
+
+        void clear() {
+            cookies.clear();
         }
     }
 

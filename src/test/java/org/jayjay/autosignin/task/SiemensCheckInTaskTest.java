@@ -15,7 +15,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -40,6 +43,10 @@ public class SiemensCheckInTaskTest {
     private volatile boolean alreadySigned;
     private volatile boolean anonymousDetail;
     private volatile boolean signedNow;
+    /** 每日任务列表里未完成的项，按顺序返回。 */
+    private final AtomicInteger tasksLeft = new AtomicInteger();
+    /** 发帖被站点拒绝时置位，模拟「请选择帖子类别」。 */
+    private volatile boolean rejectPost;
 
     @Before
     public void setUp() throws IOException {
@@ -53,12 +60,16 @@ public class SiemensCheckInTaskTest {
         alreadySigned = false;
         anonymousDetail = false;
         signedNow = false;
+        tasksLeft.set(0);
+        rejectPost = false;
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/MySupport/index.aspx", this::handleIndex);
         server.createContext("/frontend/login", this::handleLoginPage);
         server.createContext("/api/bff/v1.2/developer/ciam/login/pwd", this::handleLogin);
         server.createContext("/sso/callback", this::handleCallback);
         server.createContext("/MySupport/AjaxAPI/SignInAjax.ashx", this::handleSign);
+        server.createContext("/MySupport/AjaxAPI/EventTasksAjax.ashx", this::handleTasks);
+        server.createContext("/club/bbs/AjaxApi/PostCommitAjax.ashx", this::handlePostCommit);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
     }
@@ -199,6 +210,59 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void readsFirstSortOptionForDiscussPost() {
+        String html = "<option  value=\"84\" >软件编程</option> <option  value=\"85\" >通信</option>";
+        assertEquals("84", SiemensForumActions.sortIdFrom(html));
+        assertEquals(null, SiemensForumActions.sortIdFrom("<html></html>"));
+        assertEquals(null, SiemensForumActions.sortIdFrom(null));
+    }
+
+    @Test
+    public void recognizesNewUserPostQuotaMessage() {
+        // 新注册账号当日主贴上限，站点文案是「新注册用户当日主贴数量不能超过2个」。
+        assertTrue(SiemensForumActions.isQuotaLimited("新注册用户当日主贴数量不能超过2个，请稍候重试！"));
+        assertFalse(SiemensForumActions.isQuotaLimited("请选择帖子类别。"));
+        assertFalse(SiemensForumActions.isQuotaLimited(null));
+    }
+
+    @Test
+    public void doesNotReportStoryPostAsDoneWhenItFailed() {
+        List<String> pending = Collections.singletonList("NewMySupport_BBSPostStoryArticle");
+
+        // 故事帖失败：必须仍然列为未完成，不能报「已全部完成」。
+        assertEquals("未完成 [论坛发故事帖]",
+                SiemensCheckInTask.remainingText(pending, false, null));
+        // 故事帖提交成功：站点审核期间状态还是未完成，但不该再列出来。
+        assertEquals("已全部完成，故事帖待审核",
+                SiemensCheckInTask.remainingText(pending, true, null));
+    }
+
+    @Test
+    public void listsRemainingTasksAfterAbort() {
+        List<String> pending = Arrays.asList("NewMySupport_FAQuestion",
+                "NewMySupport_CollectionQA", "NewMySupport_BBSPostStoryArticle");
+
+        assertEquals("连续失败 2 次，已中止，未完成 [找答案提问, 收藏问答, 论坛发故事帖]",
+                SiemensCheckInTask.remainingText(pending, false, "连续失败 2 次，已中止"));
+    }
+
+    @Test
+    public void fallsBackToBuiltInContentWhenAiUnavailable() {
+        Map<String, String> environment = environment();
+        SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);
+        String title = task.fallbackContent("posttitle");
+        String body = task.fallbackContent("postbody");
+        assertFalse(title.trim().isEmpty());
+        assertFalse(body.trim().isEmpty());
+        assertEquals(null, task.fallbackContent("unknown-kind"));
+        // 同一次运行内重复取会换一条，避免帖子标题和正文撞车。
+        String second = task.fallbackContent("posttitle");
+        assertEquals(title.equals(second), TITLE_POOL_SIZE == 1);
+    }
+
+    private static final int TITLE_POOL_SIZE = 4;
+
+    @Test
     public void detectsCaptchaAndThrottleCodes() {
         assertTrue(SiemensCheckInTask.isCaptchaRequired(
                 JSONUtil.parseObj("{\"code\":\"Params.Blank.CaptchaText\"}")));
@@ -261,6 +325,45 @@ public class SiemensCheckInTaskTest {
         assertFalse(jar.headerFor("http://www.ad.siemens.com.cn/MySupport/index.aspx").contains("SiemensAuth"));
         assertFalse(jar.headerFor("https://oso.siemens.com.cn/sso/idaas/ssocallback").contains("ASP.NET_SessionId"));
         assertEquals("", jar.headerFor("https://example.com/"));
+    }
+
+    @Test
+    public void savesAndRestoresSessionCookies() throws Exception {
+        SiemensCheckInTask.CookieJar jar = new SiemensCheckInTask.CookieJar();
+        jar.store("https://oso.siemens.com.cn/sso/idaas/ssocallback",
+                "SiemensAuth=ok; Domain=.siemens.com.cn; Path=/; Secure");
+        jar.store("https://www.ad.siemens.com.cn/MySupport/index.aspx",
+                "ASP.NET_SessionId=abc; Path=/; HttpOnly");
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("siemens-session", ".txt");
+        try {
+            jar.save(file);
+
+            SiemensCheckInTask.CookieJar restored = new SiemensCheckInTask.CookieJar();
+            assertTrue(restored.load(file));
+            String header = restored.headerFor("https://www.ad.siemens.com.cn/MySupport/index.aspx");
+            assertTrue(header.contains("SiemensAuth=ok"));
+            assertTrue(header.contains("ASP.NET_SessionId=abc"));
+            // domain cookie 和 secure 标记都要完整保留。
+            assertFalse(restored.headerFor("http://www.ad.siemens.com.cn/MySupport/index.aspx")
+                    .contains("SiemensAuth"));
+
+            restored.clear();
+            assertEquals("", restored.headerFor("https://www.ad.siemens.com.cn/MySupport/index.aspx"));
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
+    }
+
+    @Test
+    public void ignoresBrokenSessionFile() throws Exception {
+        java.nio.file.Path file = java.nio.file.Files.createTempFile("siemens-session", ".txt");
+        try {
+            java.nio.file.Files.write(file, "garbage-line\n".getBytes(StandardCharsets.UTF_8));
+            SiemensCheckInTask.CookieJar jar = new SiemensCheckInTask.CookieJar();
+            assertFalse(jar.load(file));
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+        }
     }
 
     private static String plainText(SiemensCheckInTask task) {
@@ -371,6 +474,26 @@ public class SiemensCheckInTaskTest {
                 + ",\"SignDetail\":{\"UserID\":42}"
                 + ",\"GetCoinAwardCount\":" + coinChances.get()
                 + ",\"GetBigAwardCount\":" + bigChances.get() + "}", "application/json");
+    }
+
+    private void handleTasks(HttpExchange exchange) throws IOException {
+        int left = tasksLeft.get();
+        StringBuilder tasks = new StringBuilder();
+        tasks.append("{\"TaskType\":1,\"EventTasksStatus\":2,\"TaskName\":\"NewMySupport_SignIn\"}");
+        if (left >= 1) {
+            tasks.append(",{\"TaskType\":1,\"EventTasksStatus\":1,\"TaskName\":\"NewMySupport_BBSPostStoryArticle\"}");
+        }
+        write(exchange, 200, "{\"TaskList\":[" + tasks + "]}", "application/json; charset=utf-8");
+    }
+
+    private void handlePostCommit(HttpExchange exchange) throws IOException {
+        readBody(exchange);
+        if (rejectPost) {
+            write(exchange, 200, "{\"Head\":{\"Ret\":false,\"Message\":\"请选择帖子类别。\"}}",
+                    "application/json; charset=utf-8");
+            return;
+        }
+        write(exchange, 200, "{\"Head\":{\"Ret\":true}}", "application/json; charset=utf-8");
     }
 
     private static boolean authed(HttpExchange exchange) {
