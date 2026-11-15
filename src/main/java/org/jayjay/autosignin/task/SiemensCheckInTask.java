@@ -1008,7 +1008,7 @@ public class SiemensCheckInTask extends CheckInTask {
     }
 
     /**
-     * 调外部 OpenAI 兼容接口（AI_BASE_URL / AI_API_KEY / AI_MODEL，与观猹共用配置）。
+     * 调外部 OpenAI 兼容接口（AI_BASE_URL / AI_API_KEY / AI_MODEL 三项通用配置）。
      * 未配置或调用失败时返回 null，由调用方继续降级。
      */
     private String askExternalAi(String prompt) {
