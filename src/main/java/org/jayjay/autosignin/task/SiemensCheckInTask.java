@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -610,9 +611,15 @@ public class SiemensCheckInTask extends CheckInTask {
         return text.toString();
     }
 
+    /** 业务时区固定北京时间：容器和 GitHub Actions 的 TZ 不同，日期口径必须显式指定。 */
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+
     /**
      * 判断今天是否已经跑过每日任务。同一账号被多个容器或 Actions 同时配置时，
      * 重复运行会重复发帖被判灌水，所以用账号维度记录当天是否已执行。
+     * <p>
+     * 日期固定按北京时间算：容器设了 TZ=Asia/Shanghai，而 GitHub Actions 的 runner 是 UTC，
+     * 用默认时区会让同一账号在两处对「今天」的判断差 8 小时、去重标记互相不认。
      */
     private boolean alreadyRanToday() {
         String username = environment == null ? null : environment.get(USERNAME_KEY);
@@ -625,12 +632,13 @@ public class SiemensCheckInTask extends CheckInTask {
                 return false;
             }
             String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).trim();
-            return LocalDate.now().toString().equals(content);
+            return LocalDate.now(SHANGHAI).toString().equals(content);
         } catch (Exception e) {
             return false;
         }
     }
 
+    /** 写入当天标记，日期口径与 {@link #alreadyRanToday()} 一致，都按 JVM 默认时区取当天。 */
     private void markRanToday() {
         String username = environment == null ? null : environment.get(USERNAME_KEY);
         if (StrUtil.isBlank(username)) {
@@ -639,7 +647,7 @@ public class SiemensCheckInTask extends CheckInTask {
         try {
             Path file = runMarkerPath(username.trim());
             Files.createDirectories(file.getParent());
-            Files.write(file, LocalDate.now().toString().getBytes(StandardCharsets.UTF_8));
+            Files.write(file, LocalDate.now(SHANGHAI).toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             // 写不进去就当没记录，下次继续执行。
         }
@@ -978,7 +986,7 @@ public class SiemensCheckInTask extends CheckInTask {
         fallbackUses.put(kind, next + 1);
         String username = environment == null ? null : environment.get(USERNAME_KEY);
         // 用日期 + 账号完整哈希 + 取用次数共同定位，账号不同基本不会落到同一条。
-        int seed = LocalDate.now().getDayOfYear();
+        int seed = LocalDate.now(SHANGHAI).getDayOfYear();
         if (StrUtil.isNotBlank(username)) {
             seed += Math.abs(username.trim().hashCode());
         }
@@ -990,7 +998,7 @@ public class SiemensCheckInTask extends CheckInTask {
         if (aiUnavailable) {
             return null;
         }
-        String varied = prompt + "\n（今天是 " + LocalDate.now() + "，请换一个与以往不同的角度和说法"
+        String varied = prompt + "\n（今天是 " + LocalDate.now(SHANGHAI) + "，请换一个与以往不同的角度和说法"
                 + (StrUtil.isBlank(avoid) ? "。" : "，不要与下面这段雷同：" + avoid + "。");
         // 优先用外部 OpenAI 兼容接口：西门子商城 AI 对不少账号已要求二次验证，长期不可用。
         String external = askExternalAi(varied);
@@ -1004,7 +1012,7 @@ public class SiemensCheckInTask extends CheckInTask {
         }
         String answer = askAi(token, varied);
         if (StrUtil.isBlank(answer) && StrUtil.isNotBlank(avoid)) {
-            answer = askAi(token, prompt + "\n（今天是 " + LocalDate.now() + "，换个说法重新写一遍。）");
+            answer = askAi(token, prompt + "\n（今天是 " + LocalDate.now(SHANGHAI) + "，换个说法重新写一遍。）");
         }
         return answer;
     }

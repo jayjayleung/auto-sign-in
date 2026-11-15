@@ -14,6 +14,9 @@ on:
   workflow_dispatch:
 
 env:
+  # 统一按北京时间，与容器保持一致；代码里的日期判断已显式用 Asia/Shanghai，
+  # 这里主要是让日志时间戳和依赖 TZ 的第三方行为与本地部署对齐。
+  TZ: Asia/Shanghai
   MODB_USERNAME: ${{ secrets.MODB_USERNAME }}
   MODB_PASSWORD: ${{ secrets.MODB_PASSWORD }}
   TIDB_LOGIN_MODE: ${{ secrets.TIDB_LOGIN_MODE }}

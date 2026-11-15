@@ -223,6 +223,36 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void dateLogicIgnoresJvmDefaultTimeZone() throws Exception {
+        // GitHub Actions 的 runner 是 UTC，容器是 Asia/Shanghai，
+        // 日期判断必须显式按北京时间，不能跟着 JVM 默认时区走。
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"));
+            Map<String, String> environment = environment();
+            SiemensCheckInTask utcTask = new SiemensCheckInTask(environment, baseUrl, true);
+            java.lang.reflect.Method mark =
+                    SiemensCheckInTask.class.getDeclaredMethod("markRanToday");
+            mark.setAccessible(true);
+            mark.invoke(utcTask);
+            java.lang.reflect.Method ran =
+                    SiemensCheckInTask.class.getDeclaredMethod("alreadyRanToday");
+            ran.setAccessible(true);
+            assertEquals(true, ran.invoke(utcTask));
+
+            // 标记文件里存的应该是北京时间的当天，而不是 UTC 的当天。
+            java.nio.file.Path marker = SiemensCheckInTask.stateDir().resolve("siemens-ran-"
+                    + SiemensCheckInTask.sha1Hex("user@example.com").substring(0, 12) + ".txt");
+            String saved = new String(java.nio.file.Files.readAllBytes(marker),
+                    StandardCharsets.UTF_8).trim();
+            assertEquals(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString(), saved);
+        } finally {
+            java.util.TimeZone.setDefault(original);
+            clearRunMarker();
+        }
+    }
+
+    @Test
     public void firstFillStaysBelowLowWatermark() {
         // 首次只补到 FIRST_FILL，且水位线必须低于它，
         // 否则第二天就会立刻再次触发补货，失去「逐步累积」的意义。

@@ -53,6 +53,9 @@ final class ContentBank {
     /** 整轮运行里补库的总时长上限，三个库共享这一份预算。 */
     static final long REFILL_BUDGET_MILLIS = 10 * 60_000L;
 
+    /** 业务时区固定北京时间：容器和 GitHub Actions 的 TZ 不同，日期口径必须显式指定。 */
+    private static final java.time.ZoneId SHANGHAI = java.time.ZoneId.of("Asia/Shanghai");
+
     private final SiemensCheckInTask task;
     private final Path file;
     private JSONArray items;
@@ -71,7 +74,7 @@ final class ContentBank {
         JSONObject ready = firstReady(kind);
         if (ready != null) {
             ready.set("status", USED);
-            ready.set("usedAt", java.time.LocalDateTime.now().toString());
+            ready.set("usedAt", java.time.LocalDateTime.now(SHANGHAI).toString());
             save();
             return new String[]{ready.getStr("title"), ready.getStr("body")};
         }
@@ -197,7 +200,7 @@ final class ContentBank {
         item.set("title", title);
         item.set("body", body);
         item.set("status", status);
-        item.set("addedAt", java.time.LocalDate.now().toString());
+        item.set("addedAt", java.time.LocalDate.now(SHANGHAI).toString());
         item.set("usedAt", null);
         items.put(item);
         return true;
