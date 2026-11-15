@@ -63,7 +63,8 @@ public class SiemensCheckInTask extends CheckInTask {
     private static final String GROUP_ANSWER = "answer";
     /** 连续失败达到上限就停止后续任务，避免风控期间继续请求。 */
     private static final int MAX_CONSECUTIVE_FAILURES = 2;
-    private static final double DUPLICATE_THRESHOLD = 0.8;
+    /** 相似度超过这个值就判为雷同并重写。收紧到 0.6，减少回帖和评论跨天重复。 */
+    private static final double DUPLICATE_THRESHOLD = 0.6;
 
     private static final Pattern FID_PATTERN = Pattern.compile("fId\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern APP_ID_PATTERN = Pattern.compile("idaasAppId\\s*:\\s*\"([^\"]+)\"");
@@ -116,6 +117,14 @@ public class SiemensCheckInTask extends CheckInTask {
             "1516 带 PN 从站偶发掉站",
             "S7-1500 组态里设备名如何批量分配",
             "1500 通过 PN 读取变频器参数异常",
+            "S7-1500 下载硬件组态后从站起不来",
+            "1516 与 WinCC 通讯偶发中断怎么排查",
+            "S7-1500 做 MRP 环网需要注意什么",
+            "1500 的 IP 和 PN 设备名冲突如何定位",
+            "S7-1500 走 OPC UA 读数据延迟偏大",
+            "1500 程序块在线监控看不到实际值",
+            "S7-1500 与 S7-1200 做 PN 通讯配置要点",
+            "1500 固件升级后组态报错怎么回退",
     };
     private static final String[] ASK_BODIES = {
             "项目里用 1516 主站带一台第三方 PROFINET 设备，组态里能识别到设备，"
@@ -195,6 +204,8 @@ public class SiemensCheckInTask extends CheckInTask {
     private final Set<String> quotaLimited = new HashSet<>();
     /** 本次运行已经处理过的任务代码。 */
     private final Set<String> handled = new HashSet<>();
+    /** 预制内容库，懒加载。 */
+    private ContentBank contentBank;
     /** 指向真实站点时才复用并保存会话，测试用的假站点不落盘。 */
     private final boolean sessionReuseEnabled;
 
@@ -464,6 +475,7 @@ public class SiemensCheckInTask extends CheckInTask {
             return;
         }
         System.out.println("[西门子] 待完成每日任务：" + pending);
+        refillContentBanks(pending);
         SiemensForumActions forum = new SiemensForumActions(this);
         SiemensAnswerActions answer = new SiemensAnswerActions(this);
         String questionId = null;
@@ -520,6 +532,22 @@ public class SiemensCheckInTask extends CheckInTask {
             markRanToday();
         }
         reportRemaining(aborted);
+    }
+
+    /**
+     * 只在本次确实要做某项任务时才补充对应的内容库，避免白花时间生成用不上的内容。
+     */
+    private void refillContentBanks(List<String> pending) {
+        ContentBank bank = contentBank();
+        if (pending.contains(TASK_ASK)) {
+            bank.refillIfLow(ContentBank.ASK);
+        }
+        if (pending.contains(TASK_PUBLISH_POST)) {
+            bank.refillIfLow(ContentBank.POST);
+        }
+        if (pending.contains(TASK_PUBLISH_STORY)) {
+            bank.refillIfLow(ContentBank.STORY);
+        }
     }
 
     /**
@@ -630,6 +658,19 @@ public class SiemensCheckInTask extends CheckInTask {
             return app.resolve("state");
         }
         return Paths.get(System.getProperty("java.io.tmpdir"), "auto-sign-in");
+    }
+
+    /**
+     * 取当前账号的稳定序号（0 起），用来让多个容器的账号错开挑选目标，
+     * 避免所有容器每天扎堆操作同一条问答或帖子。
+     * 取模 3 是为了让序号落在很前面：跳过太多目标就要多翻好几页详情，很慢。
+     */
+    int accountIndex() {
+        String username = environment == null ? null : environment.get(USERNAME_KEY);
+        if (StrUtil.isBlank(username)) {
+            return 0;
+        }
+        return Math.abs(username.trim().hashCode()) % 3;
     }
 
     // ==================== 任务列表 ====================
@@ -878,6 +919,7 @@ public class SiemensCheckInTask extends CheckInTask {
                 return null;
             }
             System.out.println("[西门子] " + kind + " 使用内置文案");
+            rememberContent(kind, content);
             return content;
         }
         if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD) {
@@ -933,11 +975,12 @@ public class SiemensCheckInTask extends CheckInTask {
         int next = used == null ? 0 : used;
         fallbackUses.put(kind, next + 1);
         String username = environment == null ? null : environment.get(USERNAME_KEY);
+        // 用日期 + 账号完整哈希 + 取用次数共同定位，账号不同基本不会落到同一条。
         int seed = LocalDate.now().getDayOfYear();
         if (StrUtil.isNotBlank(username)) {
-            seed += Math.abs(username.trim().hashCode() % 97);
+            seed += Math.abs(username.trim().hashCode());
         }
-        return pool[(seed + next) % pool.length];
+        return pool[Math.abs(seed + next) % pool.length];
     }
 
     /** 每次请求带上当天日期和随机角度，避免连续几天生成雷同内容。 */
@@ -945,18 +988,59 @@ public class SiemensCheckInTask extends CheckInTask {
         if (aiUnavailable) {
             return null;
         }
+        String varied = prompt + "\n（今天是 " + LocalDate.now() + "，请换一个与以往不同的角度和说法"
+                + (StrUtil.isBlank(avoid) ? "。" : "，不要与下面这段雷同：" + avoid + "。");
+        // 优先用外部 OpenAI 兼容接口：西门子商城 AI 对不少账号已要求二次验证，长期不可用。
+        String external = askExternalAi(varied);
+        if (StrUtil.isNotBlank(external)) {
+            return external;
+        }
         String token = mallAccessToken();
         if (StrUtil.isBlank(token)) {
             aiUnavailable = true;
             return null;
         }
-        String varied = prompt + "\n（今天是 " + LocalDate.now() + "，请换一个与以往不同的角度和说法"
-                + (StrUtil.isBlank(avoid) ? "。" : "，不要与下面这段雷同：" + avoid + "。");
         String answer = askAi(token, varied);
         if (StrUtil.isBlank(answer) && StrUtil.isNotBlank(avoid)) {
             answer = askAi(token, prompt + "\n（今天是 " + LocalDate.now() + "，换个说法重新写一遍。）");
         }
         return answer;
+    }
+
+    /**
+     * 调外部 OpenAI 兼容接口（AI_BASE_URL / AI_API_KEY / AI_MODEL，与观猹共用配置）。
+     * 未配置或调用失败时返回 null，由调用方继续降级。
+     */
+    private String askExternalAi(String prompt) {
+        String baseUrl = environment == null ? null : environment.get("AI_BASE_URL");
+        String apiKey = environment == null ? null : environment.get("AI_API_KEY");
+        String model = environment == null ? null : environment.get("AI_MODEL");
+        if (StrUtil.isBlank(baseUrl) || StrUtil.isBlank(apiKey) || StrUtil.isBlank(model)) {
+            return null;
+        }
+        JSONObject payload = JSONUtil.createObj();
+        payload.set("model", model);
+        payload.set("messages", new JSONArray().put(JSONUtil.createObj()
+                .set("role", "user").set("content", prompt)));
+        // 推理模型会先消耗 token 再输出正文，给足预算否则 content 会是 null。
+        payload.set("max_tokens", 2000);
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Authorization", "Bearer " + apiKey);
+        HttpResult result = post(trimTrailingSlash(baseUrl) + "/chat/completions",
+                payload.toString(), "application/json;charset=UTF-8", headers, AI_TIMEOUT_MILLIS);
+        JSONObject body = parseObject(result.body);
+        if (body == null) {
+            System.out.println("[西门子] 外部 AI HTTP " + result.status + "，继续降级");
+            return null;
+        }
+        JSONArray choices = body.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            System.out.println("[西门子] 外部 AI 没有返回结果，继续降级");
+            return null;
+        }
+        String content = choices.getJSONObject(0).getJSONObject("message") == null ? null
+                : choices.getJSONObject(0).getJSONObject("message").getStr("content");
+        return StrUtil.isBlank(content) ? null : StrUtil.trim(content);
     }
 
     private String askAi(String token, String prompt) {
@@ -1289,6 +1373,18 @@ public class SiemensCheckInTask extends CheckInTask {
 
     String supportBaseUrl() {
         return supportBaseUrl;
+    }
+
+    Map<String, String> environment() {
+        return environment;
+    }
+
+    /** 内容库文件，跟着 state 目录走，重建容器只要挂载了 state 就不会丢。 */
+    ContentBank contentBank() {
+        if (contentBank == null) {
+            contentBank = new ContentBank(this, stateDir().resolve("siemens-content-bank.json"));
+        }
+        return contentBank;
     }
 
     String currentUserId() {

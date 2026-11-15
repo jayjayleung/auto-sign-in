@@ -47,13 +47,17 @@ final class SiemensForumActions {
     /** 收藏论坛帖子。跳过已经收藏过的帖子，标签必须带上（站点不认空标签）。 */
     void collectPost() {
         Set<String> favorites = favoritedArticleIds();
-        String postId = null;
+        List<String> open = new ArrayList<>();
         for (String candidate : latestForumPostIds(FAVORITE_CANDIDATES)) {
             String articleId = candidate.substring(0, candidate.indexOf('-'));
             if (favorites == null || !favorites.contains(articleId)) {
-                postId = candidate;
-                break;
+                open.add(candidate);
             }
+        }
+        String postId = null;
+        if (!open.isEmpty()) {
+            // 按账号序号错开，多个容器不会都收藏同一条。
+            postId = open.get(task.accountIndex() % open.size());
         }
         if (StrUtil.isBlank(postId)) {
             // 全部已收藏时退回最新一条，站点会提示「已经收藏过」。
@@ -136,16 +140,14 @@ final class SiemensForumActions {
     /** 在最新帖子里回帖。跳过自己的帖子，站点禁止自问自答。 */
     void replyPost() {
         String uid = task.currentUserId();
-        String postId = null;
+        List<String> others = new ArrayList<>();
         for (String candidate : latestForumPostIds(FAVORITE_CANDIDATES)) {
             if (!candidate.startsWith(uid + "-")) {
-                postId = candidate;
-                break;
+                others.add(candidate);
             }
         }
-        if (StrUtil.isBlank(postId)) {
-            postId = latestForumPostId();
-        }
+        String postId = others.isEmpty() ? latestForumPostId()
+                : others.get(task.accountIndex() % others.size());
         if (StrUtil.isBlank(postId)) {
             return;
         }
@@ -163,7 +165,7 @@ final class SiemensForumActions {
     /** 评论帖子。跳过自己和已经评论过的帖子，否则站点直接回 false。 */
     void commentPost() {
         String uid = task.currentUserId();
-        String postId = null;
+        List<String> open = new ArrayList<>();
         for (String candidate : latestForumPostIds(FAVORITE_CANDIDATES)) {
             if (candidate.startsWith(uid + "-")) {
                 continue;
@@ -181,14 +183,15 @@ final class SiemensForumActions {
             long mine = Pattern.compile("u_id=\"" + uid + "\"").matcher(post.body).results().count();
             // 别人的帖子、且我在页面上只出现 1 次（说明还没评论过）。
             if (!authorId.equals(uid) && mine <= 1) {
-                postId = candidate;
-                break;
+                open.add(candidate);
             }
         }
-        if (StrUtil.isBlank(postId)) {
+        if (open.isEmpty()) {
             System.out.println("[西门子] 没有可评论的帖子");
             return;
         }
+        // 按账号序号错开，多个容器不会都评论同一篇。
+        String postId = open.get(task.accountIndex() % open.size());
         int split = postId.indexOf('-');
         String articleId = postId.substring(0, split);
         String boardId = postId.substring(split + 1);
@@ -214,12 +217,21 @@ final class SiemensForumActions {
 
     /** 发一条探讨帖。 */
     void publishPost() {
-        String title = task.generateUnique(
-                "请用中文给西门子技术论坛想一个关于 S7-1500 与 PROFINET 应用的技术探讨帖标题，15字以内，只输出标题。",
-                "posttitle");
-        String content = task.generateUnique(
-                "请用中文写一段西门子技术论坛探讨帖正文，主题围绕 S7-1500 和 PROFINET 的实际应用经验，"
-                        + "300字以内，口语，不要分点，不要引用来源。", "postbody");
+        String[] fromBank = task.contentBank().take(ContentBank.POST);
+        String title;
+        String content;
+        if (fromBank != null) {
+            title = fromBank[0];
+            content = fromBank[1];
+            System.out.println("[西门子] 发帖使用内容库：" + title);
+        } else {
+            title = task.generateUnique(
+                    "请用中文给西门子技术论坛想一个关于 S7-1500 与 PROFINET 应用的技术探讨帖标题，15字以内，只输出标题。",
+                    "posttitle");
+            content = task.generateUnique(
+                    "请用中文写一段西门子技术论坛探讨帖正文，主题围绕 S7-1500 和 PROFINET 的实际应用经验，"
+                            + "300字以内，口语，不要分点，不要引用来源。", "postbody");
+        }
         if (StrUtil.isBlank(title) || StrUtil.isBlank(content)) {
             return;
         }
@@ -228,11 +240,20 @@ final class SiemensForumActions {
 
     /** 发一条故事帖。故事帖要站点审核，提交后不会立即计入任务。 */
     void publishStory() {
-        String title = task.generateUnique(
-                "请用中文给西门子技术论坛想一个现场调试故事的标题，15字以内，只输出标题。", "storytitle");
-        String content = task.generateUnique(
-                "请用中文写一篇西门子技术论坛的故事帖，讲一个工程师现场调试的真实感故事，"
-                        + "350字以内，第一人称口语，不要分点，不要引用来源。", "storybody");
+        String[] fromBank = task.contentBank().take(ContentBank.STORY);
+        String title;
+        String content;
+        if (fromBank != null) {
+            title = fromBank[0];
+            content = fromBank[1];
+            System.out.println("[西门子] 故事帖使用内容库：" + title);
+        } else {
+            title = task.generateUnique(
+                    "请用中文给西门子技术论坛想一个现场调试故事的标题，15字以内，只输出标题。", "storytitle");
+            content = task.generateUnique(
+                    "请用中文写一篇西门子技术论坛的故事帖，讲一个工程师现场调试的真实感故事，"
+                            + "350字以内，第一人称口语，不要分点，不要引用来源。", "storybody");
+        }
         if (StrUtil.isBlank(title) || StrUtil.isBlank(content)) {
             return;
         }

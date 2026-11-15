@@ -222,6 +222,38 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void parsesContentBankJsonWithWrapper() {
+        // 模型常把 JSON 包在 ```json 里，也会在前后加解释文字。
+        String raw = "```json\n[{\"title\":\"标题一\",\"body\":\"正文一\"},"
+                + "{\"title\":\"标题二\",\"body\":\"正文二\"}]\n```";
+        assertEquals(2, ContentBank.parseItems(raw).size());
+        assertEquals("标题一", ContentBank.parseItems(raw).get(0)[0]);
+
+        // 前后有杂字时按第一个 [ 到最后一个 ] 截取。
+        String noisy = "好的，结果如下：\n[{\"title\":\"A\",\"body\":\"B\"}]\n以上。";
+        assertEquals(1, ContentBank.parseItems(noisy).size());
+
+        // 缺字段、标题重复、完全不是 JSON 的情况都要丢掉。
+        assertEquals(0, ContentBank.parseItems("[{\"title\":\"\",\"body\":\"x\"}]").size());
+        assertEquals(1, ContentBank.parseItems(
+                "[{\"title\":\"同\",\"body\":\"1\"},{\"title\":\"同\",\"body\":\"2\"}]").size());
+        assertEquals(0, ContentBank.parseItems("这不是 JSON").size());
+        assertEquals(0, ContentBank.parseItems(null).size());
+    }
+
+    @Test
+    public void spreadsTargetsAcrossAccounts() {
+        // 三个容器账号要落在不同序号上，否则每天都操作同一条问答或帖子。
+        java.util.Set<Integer> indexes = new java.util.HashSet<>();
+        for (String username : new String[]{"15913213996", "15952755546", "18711281575"}) {
+            Map<String, String> environment = environment();
+            environment.put("SIEMENS_USERNAME", username);
+            indexes.add(new SiemensCheckInTask(environment, baseUrl).accountIndex());
+        }
+        assertEquals(3, indexes.size());
+    }
+
+    @Test
     public void detectsAlreadyFavoritedQuestion() {
         // 弹窗对已收藏问答返回「您已经收藏过了」，不能当成可提交表单重复提交。
         assertTrue(SiemensAnswerActions.isAlreadyFavorited("<div>您已经收藏过了！<a>查看我的收藏夹</a></div>"));

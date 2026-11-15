@@ -58,7 +58,8 @@ final class SiemensAnswerActions {
             return questionId;
         }
         // 只试一条：站点对收藏有频率限制，多试容易触发风控。
-        String target = candidates.get(0);
+        // 按账号序号错开，多个容器不会都收藏同一条。
+        String target = candidates.get(task.accountIndex() % candidates.size());
         postFavoriteForm(target);
         Boolean done = collectionTaskDone();
         if (Boolean.TRUE.equals(done)) {
@@ -210,22 +211,46 @@ final class SiemensAnswerActions {
 
     /** 在找答案提一个问题。表单字段要和页面脚本提交的完全一致，少一个就报「数据错误」。 */
     void askQuestion() {
-        String title = task.generateUnique("请用中文给西门子找答案想一个 S7-1500 相关的技术提问标题，30字以内，只输出标题。",
-                "asktitle");
-        String content = task.generateUnique("请用中文写一段西门子找答案的问题描述，围绕 S7-1500 组态或通讯的实际疑问，"
-                + "200字以内，具体到场景，不要分点。", "askbody");
+        // 优先从预制内容库取：站点对标题全局查重，库里的标题都是没发过的。
+        String[] fromBank = task.contentBank().take(ContentBank.ASK);
+        String title;
+        String content;
+        boolean fromLibrary = fromBank != null;
+        if (fromLibrary) {
+            title = fromBank[0];
+            content = fromBank[1];
+            System.out.println("[西门子] 提问使用内容库： " + title);
+        } else {
+            title = task.generateUnique("请用中文给西门子找答案想一个 S7-1500 相关的技术提问标题，30字以内，只输出标题。",
+                    "asktitle");
+            content = task.generateUnique("请用中文写一段西门子找答案的问题描述，围绕 S7-1500 组态或通讯的实际疑问，"
+                    + "200字以内，具体到场景，不要分点。", "askbody");
+        }
         if (StrUtil.isBlank(title) || StrUtil.isBlank(content)) {
             return;
         }
         boolean ok = submitQuestion(SiemensCheckInTask.cleanTitle(title), content);
-        if (!ok) {
-            // 站点偶发拒收时换一个标题再试一次，仍然失败就如实标记。
-            System.out.println("[西门子] 提问被拒，重试一次");
-            String retry = task.generateUnique("请用中文给西门子找答案想一个 S7-1500 相关的技术提问标题，"
-                    + "换个角度，30字以内，只输出标题。", "asktitle");
-            if (StrUtil.isNotBlank(retry)) {
-                ok = submitQuestion(SiemensCheckInTask.cleanTitle(retry), content);
+        if (!ok && fromLibrary) {
+            // 库里的标题被判重复，标记作废，后续不再取用。
+            task.contentBank().markRejected(ContentBank.ASK, title);
+        }
+        // 标题重复或偶发拒收时换标题重试：库里的标题有限，迟早会撞上已存在的。
+        for (int attempt = 0; !ok && attempt < 2; attempt++) {
+            System.out.println("[西门子] 提问被拒，换个标题重试（第 " + (attempt + 1) + " 次）");
+            String[] retryItem = task.contentBank().take(ContentBank.ASK);
+            String retry;
+            if (retryItem != null) {
+                retry = retryItem[0];
+                content = retryItem[1];
+            } else {
+                retry = task.generateUnique("请用中文给西门子找答案想一个 S7-1500 相关的技术提问标题，"
+                        + "换个完全不同的角度和场景，30字以内，只输出标题。", "asktitle");
             }
+            if (StrUtil.isBlank(retry) || retry.equals(title)) {
+                continue;
+            }
+            title = SiemensCheckInTask.cleanTitle(retry);
+            ok = submitQuestion(title, content);
         }
         if (!ok) {
             task.markTaskFailed(true);
@@ -254,10 +279,17 @@ final class SiemensAnswerActions {
                 body, task.supportHeaders(form.url));
         task.markSubmitted(GROUP);
         String response = StrUtil.blankToDefault(result.body, "");
-        boolean rejected = response.contains("数据错误") || response.contains("参数不正确")
+        // 「此问题已经存在」说明标题撞车，换标题重试才有意义。
+        boolean titleTaken = response.contains("已经存在");
+        boolean rejected = titleTaken || response.contains("数据错误") || response.contains("参数不正确")
                 || response.contains("请选择问题类别");
         System.out.println("[西门子] 提问：" + SiemensCheckInTask.abbreviate(response));
         return !rejected;
+    }
+
+    /** 站点判定标题重复时的提示，调用方据此换标题重试。 */
+    static boolean isTitleTaken(String response) {
+        return response != null && response.contains("已经存在");
     }
 
     /**
@@ -307,9 +339,13 @@ final class SiemensAnswerActions {
     /**
      * 找一条有最佳答案的已解决问题。
      * 必须带 t=1（新解决的问题），否则接口按默认的待解决列表返回，永远找不到最佳答案。
+     * <p>
+     * 按账号序号跳过前 N 条可评的答案，多个容器并行时才不会都扑在同一条上。
      */
     private String firstSolvedQuestionWithBestAnswer() {
-        for (int page = 1; page <= 2; page++) {
+        int skip = task.accountIndex();
+        List<String> candidates = new ArrayList<>();
+        for (int page = 1; page <= 2 && candidates.size() < skip + 1; page++) {
             String url = task.supportBaseUrl() + "/service/answer/AjaxApi/New_Answer/NewAnswerList.ashx?"
                     + "action=getAnswerListData&cid=0&qType=all&qCategory=0&orderType=1&pageIndex=" + page + "&t=1";
             SiemensCheckInTask.HttpResult result = task.post(url, "", task.supportHeaders(url));
@@ -317,7 +353,7 @@ final class SiemensAnswerActions {
             if (list == null) {
                 continue;
             }
-            for (int i = 0; i < list.size(); i++) {
+            for (int i = 0; i < list.size() && candidates.size() < skip + 1; i++) {
                 JSONObject item = list.getJSONObject(i);
                 String questionId = item.getStr("Q_ID");
                 String categoryId = item.getStr("C_ID");
@@ -327,11 +363,15 @@ final class SiemensAnswerActions {
                 String answerId = detail == null ? null
                         : SiemensCheckInTask.attributeValue(detail.body, "data-bestanswerid");
                 if (StrUtil.isNotBlank(answerId) && !"0".equals(answerId)) {
-                    return questionId + "-" + categoryId + "-" + answerId;
+                    candidates.add(questionId + "-" + categoryId + "-" + answerId);
                 }
             }
         }
-        return null;
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        // 候选不足以错开时退回第一条，避免因为跳过太多导致没有目标。
+        return candidates.get(Math.min(skip, candidates.size() - 1));
     }
 
     private String questionTitle(String questionId, String categoryId) {
