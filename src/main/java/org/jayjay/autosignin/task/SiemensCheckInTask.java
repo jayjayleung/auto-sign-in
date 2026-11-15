@@ -205,7 +205,7 @@ public class SiemensCheckInTask extends CheckInTask {
     /** 本次运行已经处理过的任务代码。 */
     private final Set<String> handled = new HashSet<>();
     /** 预制内容库，懒加载。 */
-    private ContentBank contentBank;
+    private volatile ContentBank contentBank;
     /** 指向真实站点时才复用并保存会话，测试用的假站点不落盘。 */
     private final boolean sessionReuseEnabled;
 

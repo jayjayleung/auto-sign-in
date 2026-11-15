@@ -44,6 +44,8 @@ final class ContentBank {
     private static final int MAX_BATCHES = 14;
     /** 单批生成超时。推理模型较慢，给足余量但要能在 cron 任务里跑完。 */
     private static final int GENERATE_TIMEOUT_MILLIS = 240_000;
+    /** 单次补库的总时长上限，超了就先用现有库存继续，不拖住整轮任务。 */
+    private static final long REFILL_BUDGET_MILLIS = 8 * 60_000L;
 
     private final SiemensCheckInTask task;
     private final Path file;
@@ -77,7 +79,6 @@ final class ContentBank {
         save();
         return content;
     }
-
     /** 标记某条标题被站点拒绝（标题已存在），后续不再复用。 */
     void markRejected(String kind, String title) {
         load();
@@ -95,6 +96,8 @@ final class ContentBank {
     /**
      * 补货：库存不足时批量生成直到达标。
      * 在运行开头调用，失败不影响签到和不需要文案的任务。
+     * <p>
+     * 有总时长上限：cron 任务每天只跑一次，不能因为 AI 慢就把整轮拖上大半小时。
      */
     void refillIfLow(String kind) {
         load();
@@ -105,9 +108,15 @@ final class ContentBank {
         }
         int needed = TARGET_SIZE - ready;
         System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，开始补充 " + needed + " 条");
+        long deadline = System.currentTimeMillis() + REFILL_BUDGET_MILLIS;
         int added = 0;
         int failures = 0;
         for (int batch = 0; batch < MAX_BATCHES && added < needed; batch++) {
+            if (System.currentTimeMillis() >= deadline) {
+                System.out.println("[西门子] " + kind + " 补库已用满 "
+                        + (REFILL_BUDGET_MILLIS / 60000) + " 分钟，先用现有 " + (ready + added) + " 条");
+                break;
+            }
             int size = Math.min(BATCH_SIZE, needed - added);
             List<String[]> generated = generate(kind, size);
             if (generated.isEmpty()) {
@@ -120,10 +129,19 @@ final class ContentBank {
                 continue;
             }
             failures = 0;
+            // 只统计真正入库的条数：标题撞车的会被 append 丢掉。
+            int stored = 0;
             for (String[] content : generated) {
-                append(kind, content[0], content[1], READY);
-                added++;
+                if (append(kind, content[0], content[1], READY)) {
+                    stored++;
+                }
             }
+            if (stored == 0) {
+                System.out.println("[西门子] " + kind + " 第 " + (batch + 1)
+                        + " 批内容全部与已有标题重复，跳过");
+                continue;
+            }
+            added += stored;
             save();
             System.out.println("[西门子] " + kind + " 已补充 " + added + " 条");
         }
@@ -150,15 +168,19 @@ final class ContentBank {
         return null;
     }
 
-    private void append(String kind, String title, String body, String status) {
+    /**
+     * 把一条内容入库。标题已存在或字段为空时丢弃，返回是否真的加进去了。
+     * 调用方必须按返回值计数，否则会因为标题重复而虚报补充条数。
+     */
+    private boolean append(String kind, String title, String body, String status) {
         if (StrUtil.isBlank(title) || StrUtil.isBlank(body)) {
-            return;
+            return false;
         }
         // 标题重复的直接丢弃，站点认的是标题。
         for (int i = 0; i < items.size(); i++) {
             JSONObject item = items.getJSONObject(i);
             if (item != null && title.equals(item.getStr("title"))) {
-                return;
+                return false;
             }
         }
         JSONObject item = JSONUtil.createObj();
@@ -169,6 +191,7 @@ final class ContentBank {
         item.set("addedAt", java.time.LocalDate.now().toString());
         item.set("usedAt", null);
         items.put(item);
+        return true;
     }
 
     // ==================== 生成 ====================
@@ -184,12 +207,18 @@ final class ContentBank {
             return result;
         }
         String prompt = buildPrompt(kind, count);
+        // 把已用过的标题喂给模型，避免库空时反复生成同一条。
+        String existing = existingTitles(kind);
+        if (StrUtil.isNotBlank(existing)) {
+            prompt = prompt + "\n\n以下标题已经用过，绝对不要再出现相同或近似的：\n" + existing;
+        }
         JSONObject payload = JSONUtil.createObj();
         payload.set("model", model);
         payload.set("messages", new JSONArray().put(JSONUtil.createObj()
                 .set("role", "user").set("content", prompt)));
         // 推理模型先消耗 token 再出正文，预算给足否则 content 会是 null。
-        payload.set("max_tokens", 8000);
+        // 上限可按模型调整：部分模型（如 gpt-4o）上限较低，超出会直接报错。
+        payload.set("max_tokens", maxTokens());
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Authorization", "Bearer " + apiKey);
         headers.put("Content-Type", "application/json;charset=UTF-8");
@@ -198,7 +227,8 @@ final class ContentBank {
             HttpResponse response = HttpRequest.post(url).body(payload.toString())
                     .headerMap(headers, true).timeout(GENERATE_TIMEOUT_MILLIS).execute();
             if (response.getStatus() != 200) {
-                System.out.println("[西门子] 生成内容 HTTP " + response.getStatus());
+                System.out.println("[西门子] 生成内容 HTTP " + response.getStatus()
+                        + "：" + StrUtil.maxLength(response.body(), 200));
                 return result;
             }
             JSONObject body = JSONUtil.parseObj(response.body());
@@ -285,8 +315,40 @@ final class ContentBank {
                 + "5. 严格输出 JSON 数组，每项形如 {\"title\":\"...\",\"body\":\"...\"}，不要任何解释文字";
     }
 
+    /** 取该类型下已有（用过或被拒）的标题，供提示词去重；太多时只取最近的部分。 */
+    private String existingTitles(String kind) {
+        List<String> titles = new ArrayList<>();
+        for (int i = items.size() - 1; i >= 0 && titles.size() < 20; i--) {
+            JSONObject item = items.getJSONObject(i);
+            if (item == null || !kind.equals(item.getStr("kind"))) {
+                continue;
+            }
+            String title = item.getStr("title");
+            if (StrUtil.isNotBlank(title)) {
+                titles.add(title);
+            }
+        }
+        return String.join("\n", titles);
+    }
+
     private String env(String key) {
         return task == null || task.environment() == null ? null : task.environment().get(key);
+    }
+
+    /** 生成用的 token 上限，可用 AI_MAX_TOKENS 覆盖；默认 8000 适配推理模型。 */
+    private int maxTokens() {
+        String configured = env("AI_MAX_TOKENS");
+        if (StrUtil.isNotBlank(configured)) {
+            try {
+                int value = Integer.parseInt(configured.trim());
+                if (value > 0) {
+                    return value;
+                }
+            } catch (NumberFormatException ignored) {
+                // 填错就用默认值。
+            }
+        }
+        return 8000;
     }
 
     // ==================== 存取 ====================
@@ -317,7 +379,16 @@ final class ContentBank {
         }
         try {
             Files.createDirectories(file.getParent());
-            Files.write(file, items.toString().getBytes(StandardCharsets.UTF_8));
+            // 先写临时文件再改名：cron 进程可能在写入途中被终止，
+            // 直接覆盖会留下损坏的 JSON，下次启动按空库处理就丢了全部去重记录。
+            Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.write(temp, items.toString().getBytes(StandardCharsets.UTF_8));
+            try {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (Exception e) {
             // 写不进去只影响下次复用，不影响本次。
         }

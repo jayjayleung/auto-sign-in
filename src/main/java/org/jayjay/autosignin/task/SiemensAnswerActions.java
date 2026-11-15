@@ -239,17 +239,26 @@ final class SiemensAnswerActions {
             System.out.println("[西门子] 提问被拒，换个标题重试（第 " + (attempt + 1) + " 次）");
             String[] retryItem = task.contentBank().take(ContentBank.ASK);
             String retry;
+            String retryBody;
             if (retryItem != null) {
                 retry = retryItem[0];
-                content = retryItem[1];
+                retryBody = retryItem[1];
             } else {
+                // 库里没有了就标题和正文一起重写，只换标题会让两者对不上。
                 retry = task.generateUnique("请用中文给西门子找答案想一个 S7-1500 相关的技术提问标题，"
                         + "换个完全不同的角度和场景，30字以内，只输出标题。", "asktitle");
+                retryBody = task.generateUnique("请用中文写一段西门子找答案的问题描述，围绕 S7-1500 组态或通讯的实际疑问，"
+                        + "200字以内，具体到场景，不要分点。", "askbody");
             }
-            if (StrUtil.isBlank(retry) || retry.equals(title)) {
+            if (StrUtil.isBlank(retry) || StrUtil.isBlank(retryBody)) {
                 continue;
             }
-            title = SiemensCheckInTask.cleanTitle(retry);
+            String cleaned = SiemensCheckInTask.cleanTitle(retry);
+            if (cleaned.equals(title)) {
+                continue;
+            }
+            title = cleaned;
+            content = retryBody;
             ok = submitQuestion(title, content);
         }
         if (!ok) {
@@ -285,11 +294,6 @@ final class SiemensAnswerActions {
                 || response.contains("请选择问题类别");
         System.out.println("[西门子] 提问：" + SiemensCheckInTask.abbreviate(response));
         return !rejected;
-    }
-
-    /** 站点判定标题重复时的提示，调用方据此换标题重试。 */
-    static boolean isTitleTaken(String response) {
-        return response != null && response.contains("已经存在");
     }
 
     /**

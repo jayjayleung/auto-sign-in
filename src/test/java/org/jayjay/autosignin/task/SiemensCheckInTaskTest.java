@@ -1,5 +1,6 @@
 package org.jayjay.autosignin.task;
 
+import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.sun.net.httpserver.HttpExchange;
@@ -219,6 +220,32 @@ public class SiemensCheckInTaskTest {
         assertEquals("84", SiemensForumActions.sortIdFrom(html));
         assertEquals(null, SiemensForumActions.sortIdFrom("<html></html>"));
         assertEquals(null, SiemensForumActions.sortIdFrom(null));
+    }
+
+    @Test
+    public void countsOnlyActuallyStoredItems() throws Exception {
+        // 库补货时如果标题全撞车，不能虚报已补充条数。
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("bank");
+        java.nio.file.Path file = dir.resolve("bank.json");
+        try {
+            SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+            ContentBank bank = new ContentBank(task, file);
+            // 直接构造一个含重复标题的数组，验证 append 的返回值语义。
+            JSONArray items = JSONUtil.parseArray("[{\"kind\":\"ask\",\"title\":\"同一条\",\"body\":\"正文\",\"status\":\"ready\"}]");
+            java.lang.reflect.Field field = ContentBank.class.getDeclaredField("items");
+            field.setAccessible(true);
+            field.set(bank, items);
+
+            java.lang.reflect.Method append = ContentBank.class.getDeclaredMethod(
+                    "append", String.class, String.class, String.class, String.class);
+            append.setAccessible(true);
+            assertEquals(false, append.invoke(bank, "ask", "同一条", "另一段正文", "ready"));
+            assertEquals(true, append.invoke(bank, "ask", "新标题", "正文", "ready"));
+            assertEquals(2, items.size());
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+            java.nio.file.Files.deleteIfExists(dir);
+        }
     }
 
     @Test
