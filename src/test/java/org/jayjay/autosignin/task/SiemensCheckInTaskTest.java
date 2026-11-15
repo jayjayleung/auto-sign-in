@@ -223,6 +223,14 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void firstFillStaysBelowLowWatermark() {
+        // 首次只补到 FIRST_FILL，且水位线必须低于它，
+        // 否则第二天就会立刻再次触发补货，失去「逐步累积」的意义。
+        assertTrue("水位线必须低于首次补货量", ContentBank.LOW_WATERMARK < ContentBank.FIRST_FILL);
+        assertTrue("首次补货量不应超过目标库存", ContentBank.FIRST_FILL < ContentBank.TARGET_SIZE);
+    }
+
+    @Test
     public void countsOnlyActuallyStoredItems() throws Exception {
         // 库补货时如果标题全撞车，不能虚报已补充条数。
         java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("bank");

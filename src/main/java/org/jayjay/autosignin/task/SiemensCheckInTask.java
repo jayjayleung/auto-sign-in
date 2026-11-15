@@ -536,17 +536,19 @@ public class SiemensCheckInTask extends CheckInTask {
 
     /**
      * 只在本次确实要做某项任务时才补充对应的内容库，避免白花时间生成用不上的内容。
+     * 三个库共享一份时长预算，谁先用完谁停，剩下的用现场生成兜底。
      */
     private void refillContentBanks(List<String> pending) {
         ContentBank bank = contentBank();
+        long deadline = System.currentTimeMillis() + ContentBank.REFILL_BUDGET_MILLIS;
         if (pending.contains(TASK_ASK)) {
-            bank.refillIfLow(ContentBank.ASK);
+            bank.refillIfLow(ContentBank.ASK, deadline);
         }
         if (pending.contains(TASK_PUBLISH_POST)) {
-            bank.refillIfLow(ContentBank.POST);
+            bank.refillIfLow(ContentBank.POST, deadline);
         }
         if (pending.contains(TASK_PUBLISH_STORY)) {
-            bank.refillIfLow(ContentBank.STORY);
+            bank.refillIfLow(ContentBank.STORY, deadline);
         }
     }
 

@@ -34,18 +34,24 @@ final class ContentBank {
     private static final String READY = "ready";
     private static final String USED = "used";
     private static final String REJECTED = "rejected";
-    /** 库存低于这个数就在运行开头补货。 */
-    static final int LOW_WATERMARK = 10;
-    /** 补货目标条数。每账号每天用 1 条，20 条约够 20 天，补一次约 2 分钟。 */
+    /** 库存低于这个数就在运行开头补货。设得比首次补货量低，才能逐步累积而不是每天补一次。 */
+    static final int LOW_WATERMARK = 5;
+    /**
+     * 补货目标条数。每账号每天用 1 条：
+     * 库空时只补到 {@link #FIRST_FILL} 条，避免首次运行因生成太多内容而拖太久；
+     * 之后每次不足水位线就补齐到 {@link #TARGET_SIZE}，逐步累积。
+     */
     static final int TARGET_SIZE = 20;
+    /** 库完全为空时的首次补货目标，约 1 分钟，避免三个库一起补把运行拖到十分钟。 */
+    static final int FIRST_FILL = 10;
     /** 每批生成条数：批次太大推理模型容易超时，5 条实测约 25-40 秒。 */
     private static final int BATCH_SIZE = 5;
-    /** 补货最多尝试几批，避免 AI 异常时卡住整个任务。 */
-    private static final int MAX_BATCHES = 14;
+    /** 补货最多尝试几批：补满 20 条只需 3 批，多留几批应对偶发失败。 */
+    private static final int MAX_BATCHES = 6;
     /** 单批生成超时。推理模型较慢，给足余量但要能在 cron 任务里跑完。 */
     private static final int GENERATE_TIMEOUT_MILLIS = 240_000;
-    /** 单次补库的总时长上限，超了就先用现有库存继续，不拖住整轮任务。 */
-    private static final long REFILL_BUDGET_MILLIS = 8 * 60_000L;
+    /** 整轮运行里补库的总时长上限，三个库共享这一份预算。 */
+    static final long REFILL_BUDGET_MILLIS = 10 * 60_000L;
 
     private final SiemensCheckInTask task;
     private final Path file;
@@ -97,24 +103,27 @@ final class ContentBank {
      * 补货：库存不足时批量生成直到达标。
      * 在运行开头调用，失败不影响签到和不需要文案的任务。
      * <p>
-     * 有总时长上限：cron 任务每天只跑一次，不能因为 AI 慢就把整轮拖上大半小时。
+     * 库完全为空时只补到 {@link #FIRST_FILL} 条，避免首次运行一次性生成太多而拖长时间；
+     * 已有库存但跌破水位线时补齐到 {@link #TARGET_SIZE}，逐步累积到满。
+     * 总时长按整轮运行共享：三个库一起补时不能各算各的，否则会串成半小时。
      */
-    void refillIfLow(String kind) {
+    void refillIfLow(String kind, long deadline) {
         load();
         int ready = countReady(kind);
         if (ready >= LOW_WATERMARK) {
             System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，无需补充");
             return;
         }
-        int needed = TARGET_SIZE - ready;
-        System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，开始补充 " + needed + " 条");
-        long deadline = System.currentTimeMillis() + REFILL_BUDGET_MILLIS;
+        int target = ready == 0 ? FIRST_FILL : TARGET_SIZE;
+        int needed = target - ready;
+        System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，补充到 "
+                + target + " 条（本次生成 " + needed + " 条）");
         int added = 0;
         int failures = 0;
         for (int batch = 0; batch < MAX_BATCHES && added < needed; batch++) {
             if (System.currentTimeMillis() >= deadline) {
-                System.out.println("[西门子] " + kind + " 补库已用满 "
-                        + (REFILL_BUDGET_MILLIS / 60000) + " 分钟，先用现有 " + (ready + added) + " 条");
+                System.out.println("[西门子] " + kind + " 补库总时长已用满，先用现有 "
+                        + (ready + added) + " 条");
                 break;
             }
             int size = Math.min(BATCH_SIZE, needed - added);
