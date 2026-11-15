@@ -638,7 +638,7 @@ public class SiemensCheckInTask extends CheckInTask {
         }
     }
 
-    /** 写入当天标记，日期口径与 {@link #alreadyRanToday()} 一致，都按 JVM 默认时区取当天。 */
+    /** 写入当天标记，日期口径与 {@link #alreadyRanToday()} 一致，都按北京时间取当天。 */
     private void markRanToday() {
         String username = environment == null ? null : environment.get(USERNAME_KEY);
         if (StrUtil.isBlank(username)) {
