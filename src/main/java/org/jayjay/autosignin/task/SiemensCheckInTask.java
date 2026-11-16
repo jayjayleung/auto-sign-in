@@ -487,6 +487,20 @@ public class SiemensCheckInTask extends CheckInTask {
             System.out.println("[西门子] 轮次协同准备失败，按单账号流程继续：" + e.getMessage());
         }
         SiemensForumActions forum = new SiemensForumActions(this);
+        // 故事帖要等审核，结果在下一次运行时才知道，先看上次提交的过了没有。
+        try {
+            List<String[]> reviews = forum.readStoryReviews();
+            if (!reviews.isEmpty()) {
+                forum.markRejectedStories(reviews);
+                List<String> parts = new ArrayList<>();
+                for (String[] review : reviews) {
+                    parts.add("「" + review[0] + "」" + review[1]);
+                }
+                addMessage("故事审核：", String.join("；", parts));
+            }
+        } catch (Exception e) {
+            System.out.println("[西门子] 读取故事审核结果失败：" + e.getMessage());
+        }
         SiemensAnswerActions answer = new SiemensAnswerActions(this);
         String questionId = null;
         String aborted = null;
@@ -1412,6 +1426,52 @@ public class SiemensCheckInTask extends CheckInTask {
             pipeline = new SiemensPipeline(this);
         }
         return pipeline;
+    }
+
+    /** 已经上报过的故事审核通知 ID，按账号存，避免每天重复报同一批结果。 */
+    Set<String> handledReviewIds() {
+        Set<String> ids = new HashSet<>();
+        Path file = reviewIdsPath();
+        if (file == null || !Files.exists(file)) {
+            return ids;
+        }
+        try {
+            String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            for (String line : text.split("\\R")) {
+                if (StrUtil.isNotBlank(line)) {
+                    ids.add(line.trim());
+                }
+            }
+        } catch (Exception e) {
+            // 读不到就当没处理过，最多重复报一次。
+        }
+        return ids;
+    }
+
+    void markReviewHandled(String noticeId) {
+        if (StrUtil.isBlank(noticeId)) {
+            return;
+        }
+        Path file = reviewIdsPath();
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.write(file, (noticeId.trim() + "\n").getBytes(StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception e) {
+            // 写不进去只会导致下次重复报一次。
+        }
+    }
+
+    private Path reviewIdsPath() {
+        String username = environment == null ? null : environment.get(USERNAME_KEY);
+        if (StrUtil.isBlank(username)) {
+            return null;
+        }
+        return stateDir().resolve("siemens-story-reviews-" + sha1Hex(username.trim()).substring(0, 12) + ".txt");
     }
 
     String currentUserId() {

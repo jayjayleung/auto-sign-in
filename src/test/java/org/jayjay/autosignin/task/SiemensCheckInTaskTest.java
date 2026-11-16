@@ -418,6 +418,31 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void readsStoryRejectionReasonFromNotice() throws Exception {
+        // 故事审核通知的正文格式：您提交的故事“标题”未通过审核,未通过原因：xxx。
+        java.lang.reflect.Field field = SiemensForumActions.class.getDeclaredField("STORY_REVIEW");
+        field.setAccessible(true);
+        java.util.regex.Pattern pattern = (java.util.regex.Pattern) field.get(null);
+
+        java.util.regex.Matcher rejected = pattern.matcher(
+                "您好！ 您提交的故事“深夜排查组网风暴干扰”未通过审核,未通过原因：非原创内容。 建议您重新编辑后再次提交");
+        assertTrue(rejected.find());
+        assertEquals("深夜排查组网风暴干扰", rejected.group(1));
+        assertEquals("非原创内容", rejected.group(2));
+        assertEquals(null, rejected.group(3));
+
+        // 被降级成普通帖的通知里没有「未通过原因」，要用另一段文案识别。
+        java.util.regex.Matcher converted = pattern.matcher(
+                "您提交的故事“第一次独立调试”被转换为普通帖发布到“谈天说地”，您可以点击此处查看");
+        assertTrue(converted.find());
+        assertEquals("第一次独立调试", converted.group(1));
+        assertNotEquals(null, converted.group(3));
+
+        // 正常通知不能误判。
+        assertFalse(pattern.matcher("您的回答被赞啦").find());
+    }
+
+    @Test
     public void recognizesNewUserPostQuotaMessage() {
         // 新注册账号当日主贴上限，站点文案是「新注册用户当日主贴数量不能超过2个」。
         assertTrue(SiemensForumActions.isQuotaLimited("新注册用户当日主贴数量不能超过2个，请稍候重试！"));

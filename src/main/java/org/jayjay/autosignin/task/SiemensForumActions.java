@@ -27,6 +27,15 @@ final class SiemensForumActions {
     /** 故事帖走「谈天说地」版区和对应子分类。 */
     private static final String STORY_BOARD_ID = "25";
     private static final String STORY_SORT_ID = "123";
+    /** 消息中心里的故事审核通知标题，驳回和转普通帖都会发一条。 */
+    private static final String REVIEW_NOTICE_TITLE = "故事审核通知";
+    /** 审核通知的正文是「您提交的故事“标题”未通过审核,未通过原因：xxx」。 */
+    private static final Pattern STORY_REVIEW = Pattern.compile(
+            "您提交的故事[“\"]([^”\"]+)[”\"](?:未通过审核[,，]未通过原因[:：]([^。]+)|(被转换为普通帖))");
+    /** 我的消息列表里每条通知的链接和标题。 */
+    private static final Pattern NOTICE_LINK = Pattern.compile(
+            "MyMsgDetail\\.aspx\\?noticeId=(\\d+)\"[^>]*>(.{0,600}?)</div>\\s*<div class=\"fr right\">",
+            Pattern.DOTALL);
     /** 收藏帖子时最多往前看几条，避免最新帖已收藏时无解。 */
     private static final int FAVORITE_CANDIDATES = 6;
     /**
@@ -268,10 +277,14 @@ final class SiemensForumActions {
             System.out.println("[西门子] 故事帖使用内容库：" + title);
         } else {
             title = task.generateUnique(
-                    "请用中文给西门子技术论坛想一个现场调试故事的标题，15字以内，只输出标题。", "storytitle");
+                    "请用中文给西门子技术论坛想一个现场经历故事标题，要具体到这次经历的特征，"
+                            + "不要用「一次…」「记一次…」这类泛泛开头，15字以内，只输出标题。", "storytitle");
             content = task.generateUnique(
-                    "请用中文写一篇西门子技术论坛的故事帖，讲一个工程师现场调试的真实感故事，"
-                            + "350字以内，第一人称口语，不要分点，不要引用来源。", "storybody");
+                    "请用中文写一篇西门子技术论坛的故事帖，第一人称讲自己亲历的一次现场调试："
+                            + "开头交代时间和现场氛围，必须写出具体的硬件型号、软件版本、报警代码或测量数值，"
+                            + "写清楚先怀疑了什么、怎么发现判断错了、真正原因是什么，最后写这次之后改了什么习惯。"
+                            + "细节要独一无二，不要写「网线松动」「设备名冲突」「接地不良」这类通用桥段，"
+                            + "350字以内，不要分点，不要引用来源，不要出现真实人名和公司名。", "storybody");
         }
         if (StrUtil.isBlank(title) || StrUtil.isBlank(content)) {
             return;
@@ -373,8 +386,7 @@ final class SiemensForumActions {
     }
 
     /** 从「最新发帖」列表取一条帖子，返回 articleId-boardId。 */
-    private String latestForumPostId() {
-        SiemensCheckInTask.Page page = task.follow(task.supportBaseUrl() + "/club/bbs/bbs_latest.aspx");
+    private String latestForumPostId() {        SiemensCheckInTask.Page page = task.follow(task.supportBaseUrl() + "/club/bbs/bbs_latest.aspx");
         if (page == null) {
             return null;
         }
@@ -382,8 +394,62 @@ final class SiemensForumActions {
         return matcher.find() ? matcher.group(1) + "-" + matcher.group(2) : null;
     }
 
-    private String authorOf(String articleId, String boardId) {
-        SiemensCheckInTask.Page page = task.follow(
+    /**
+     * 读取消息中心里还没处理过的故事审核结果。
+     * <p>
+     * 故事帖提交后要等审核，结果以站内消息下发，可能是「未通过审核」（附原因），
+     * 也可能是「被转换为普通帖发布」，后者说明内容被判成普通帖，同样不计入故事帖任务。
+     * 已处理过的通知记在 state 目录，避免每天重复上报同一批结果。
+     * 返回 {标题, 结论} 列表，拿不到时返回空列表。
+     */
+    List<String[]> readStoryReviews() {
+        List<String[]> reviews = new ArrayList<>();
+        SiemensCheckInTask.Page page = task.follow(task.supportBaseUrl() + "/MySupport/MyMsgmain.aspx");
+        if (page == null || page.body == null) {
+            return reviews;
+        }
+        Set<String> handled = task.handledReviewIds();
+        Matcher link = NOTICE_LINK.matcher(page.body);
+        List<String> ids = new ArrayList<>();
+        while (link.find()) {
+            // 标题在 center 的 title 属性里，审核通知不会太多，全都看一眼。
+            if (link.group(2).contains(REVIEW_NOTICE_TITLE) && !handled.contains(link.group(1))) {
+                ids.add(link.group(1));
+            }
+        }
+        for (String id : ids) {
+            SiemensCheckInTask.Page detail = task.follow(
+                    task.supportBaseUrl() + "/MySupport/MyMsgDetail.aspx?noticeId=" + id);
+            if (detail == null || detail.body == null) {
+                continue;
+            }
+            org.jsoup.nodes.Element body = org.jsoup.Jsoup.parse(detail.body).selectFirst(".msg-detail-btm");
+            String text = body == null ? "" : body.text().replaceAll("\\s+", " ");
+            Matcher matcher = STORY_REVIEW.matcher(text);
+            // 详情页读不到或不是审核通知时也记下 ID，避免每次重试同一条。
+            task.markReviewHandled(id);
+            if (!matcher.find()) {
+                continue;
+            }
+            String title = matcher.group(1);
+            String result = matcher.group(3) != null
+                    ? "被转成普通帖" : "未通过审核：" + StrUtil.trim(matcher.group(2));
+            reviews.add(new String[]{title, result});
+        }
+        return reviews;
+    }
+
+    /**
+     * 把审核没通过的故事标题在内容库里标记作废，以后不再取用。
+     * 被驳回的标题站点已经认过，重发只会再被拒一次。
+     */
+    void markRejectedStories(List<String[]> reviews) {
+        for (String[] review : reviews) {
+            task.contentBank().markRejected(ContentBank.STORY, review[0]);
+        }
+    }
+
+    private String authorOf(String articleId, String boardId) {        SiemensCheckInTask.Page page = task.follow(
                 task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
         if (page == null) {
             return "";
