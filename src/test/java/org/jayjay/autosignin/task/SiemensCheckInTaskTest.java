@@ -355,6 +355,69 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void siblingCommentsAreSpacedByAtLeastOneDay() throws Exception {
+        // 互评隔天一次，避免三个账号天天互评被看出关系。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("pipeline");
+        java.nio.file.Path file = dir.resolve(SiemensPipeline.FILE_NAME);
+        try {
+            java.lang.reflect.Constructor<SiemensPipeline> ctor =
+                    SiemensPipeline.class.getDeclaredConstructor(SiemensCheckInTask.class);
+            ctor.setAccessible(true);
+            SiemensPipeline pipeline = ctor.newInstance(task);
+            java.lang.reflect.Field field = SiemensPipeline.class.getDeclaredField("file");
+            field.setAccessible(true);
+            field.set(pipeline, file);
+
+            java.lang.reflect.Method allowed =
+                    SiemensPipeline.class.getDeclaredMethod("siblingCommentAllowed", String.class);
+            allowed.setAccessible(true);
+            java.lang.reflect.Method mark =
+                    SiemensPipeline.class.getDeclaredMethod("markSiblingComment", String.class);
+            mark.setAccessible(true);
+
+            // 从没互评过：允许。
+            assertTrue((Boolean) allowed.invoke(pipeline, "1820833"));
+
+            mark.invoke(pipeline, "1820833");
+            // 同一天再跑：不允许，否则就是天天互评。
+            assertFalse((Boolean) allowed.invoke(pipeline, "1820833"));
+
+            // 昨天互评过：仍然不允许，必须隔满一天。
+            java.time.LocalDate yesterday = java.time.LocalDate.now(
+                    java.time.ZoneId.of("Asia/Shanghai")).minusDays(1);
+            java.lang.reflect.Method last =
+                    SiemensPipeline.class.getDeclaredMethod("lastSiblingComment", String.class);
+            last.setAccessible(true);
+            cn.hutool.json.JSONObject store = cn.hutool.json.JSONUtil.parseObj(
+                    new String(java.nio.file.Files.readAllBytes(file), StandardCharsets.UTF_8));
+            store.getJSONObject("siblingComments").set("1820833", yesterday.toString());
+            java.nio.file.Files.write(file, store.toString().getBytes(StandardCharsets.UTF_8));
+            java.lang.reflect.Field storeField = SiemensPipeline.class.getDeclaredField("store");
+            storeField.setAccessible(true);
+            storeField.set(pipeline, null);
+            assertFalse((Boolean) allowed.invoke(pipeline, "1820833"));
+
+            // 前天互评过：允许。
+            store.getJSONObject("siblingComments").set("1820833", yesterday.minusDays(1).toString());
+            java.nio.file.Files.write(file, store.toString().getBytes(StandardCharsets.UTF_8));
+            storeField.set(pipeline, null);
+            assertTrue((Boolean) allowed.invoke(pipeline, "1820833"));
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+            java.nio.file.Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
+    public void parsesSiteDateMillis() {
+        // 站点接口的时间是 /Date(毫秒)/，要能转成北京时间的日期。
+        assertEquals("2026-11-16", SiemensPipeline.dateOf("/Date(1794791942350)/"));
+        assertEquals("", SiemensPipeline.dateOf(null));
+        assertEquals("", SiemensPipeline.dateOf("2026-11-16"));
+    }
+
+    @Test
     public void recognizesNewUserPostQuotaMessage() {
         // 新注册账号当日主贴上限，站点文案是「新注册用户当日主贴数量不能超过2个」。
         assertTrue(SiemensForumActions.isQuotaLimited("新注册用户当日主贴数量不能超过2个，请稍候重试！"));

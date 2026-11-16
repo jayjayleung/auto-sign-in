@@ -153,11 +153,17 @@ final class SiemensAnswerActions {
 
     /** 回答一条待解决问题。跳过自己提的问题，站点禁止自问自答。 */
     void answerQuestion() {
+        // 优先接兄弟账号刚提的问题：这样提问方下一轮才能采纳，形成三账号闭环。
+        String[] sibling = task.pipeline().nextQuestionToAnswer(task.currentUserId());
+        if (sibling != null) {
+            System.out.println("[西门子] 回答兄弟账号的提问：" + sibling[0]);
+            if (answerQuestion(sibling[0], sibling[1])) {
+                task.pipeline().recordAnswer(task.currentUserId(), sibling[0]);
+                return;
+            }
+            // 轮次里的问题可能已被关闭，退回站上随机挑。
+        }
         // 列表接口自带标题和正文，直接用；取不到标题就不回答，避免把空主题喂给模型。
-        String questionId = null;
-        String categoryId = null;
-        String questionTitle = null;
-        String questionBody = null;
         for (String candidate : unsolvedQuestions(FAVORITE_CANDIDATES)) {
             // 格式：questionId-categoryId-askerId-标题-正文，标题和正文里可能含分隔符，所以限定段数。
             String[] parts = candidate.split("-", 5);
@@ -168,16 +174,32 @@ final class SiemensAnswerActions {
             if (StrUtil.isNotBlank(task.currentUserId()) && task.currentUserId().equals(asker)) {
                 continue;
             }
-            questionId = parts[0];
-            categoryId = parts[1];
-            questionTitle = parts.length > 3 ? parts[3] : null;
-            questionBody = parts.length > 4 ? parts[4] : null;
-            break;
-        }
-        if (StrUtil.isBlank(questionId)) {
-            System.out.println("[西门子] 没有待回答的问题");
+            String questionTitle = parts.length > 3 ? parts[3] : null;
+            String questionBody = parts.length > 4 ? parts[4] : null;
+            if (answerQuestion(parts[0], parts[1], questionTitle, questionBody)) {
+                return;
+            }
             return;
         }
+        System.out.println("[西门子] 没有待回答的问题");
+    }
+
+    /** 按问题 ID 回答，标题和正文从接口补全；返回是否真的提交成功。 */
+    private boolean answerQuestion(String questionId, String categoryId) {
+        for (String candidate : unsolvedQuestions(FAVORITE_CANDIDATES)) {
+            String[] parts = candidate.split("-", 5);
+            if (parts.length >= 2 && questionId.equals(parts[0])) {
+                return answerQuestion(questionId, categoryId, parts.length > 3 ? parts[3] : null,
+                        parts.length > 4 ? parts[4] : null);
+            }
+        }
+        System.out.println("[西门子] 轮次里的问题已不在待解决列表，跳过：" + questionId);
+        return false;
+    }
+
+    /** 提交一条回答，标题和正文都可能为空；标题为空时用内置文案。 */
+    private boolean answerQuestion(String questionId, String categoryId,
+                                   String questionTitle, String questionBody) {
         String answer;
         if (StrUtil.isBlank(questionTitle)) {
             System.out.println("[西门子] 拿不到问题标题，改用内置回答：" + questionId);
@@ -190,7 +212,7 @@ final class SiemensAnswerActions {
             answer = task.generateUnique(prompt, "answer");
         }
         if (StrUtil.isBlank(answer)) {
-            return;
+            return false;
         }
         String body = "A_Content=" + SiemensCheckInTask.encode(answer);
         body += "&A_Reference=&Q_ID=" + questionId + "&cid=" + categoryId
@@ -200,10 +222,18 @@ final class SiemensAnswerActions {
         SiemensCheckInTask.HttpResult result = task.post(url, body, task.supportHeaders(url));
         task.markSubmitted(GROUP);
         System.out.println("[西门子] 回答 HTTP " + result.status);
+        return result.status == 200 || result.status == 302;
     }
 
     /** 评论一条已采纳的最佳答案。 */
     void commentBestAnswer() {
+        // 优先评论兄弟账号刚被采纳的答案：这条链路是确定的，不依赖站上随机出现的新问答。
+        String comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
+                + "最佳答案讨论的是 S7-1500 的组态与通讯问题"
+                + "。评论要补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+        if (StrUtil.isNotBlank(comment) && task.pipeline().commentSiblingAnswer(task.currentUserId(), comment)) {
+            return;
+        }
         String solved = firstSolvedQuestionWithBestAnswer();
         if (StrUtil.isBlank(solved)) {
             System.out.println("[西门子] 没有找到带最佳答案的问题");
@@ -214,7 +244,6 @@ final class SiemensAnswerActions {
         String categoryId = parts[1];
         String answerId = parts[2];
         String answerText = parts.length > 3 ? parts[3] : null;
-        String comment;
         if (StrUtil.isBlank(answerText)) {
             // 没有答案原文时写不出「结合答案补充经验」，改用内置文案，避免模型反过来索要内容。
             System.out.println("[西门子] 拿不到最佳答案内容，改用内置评论：" + answerId);
@@ -290,7 +319,10 @@ final class SiemensAnswerActions {
         }
         if (!ok) {
             task.markTaskFailed(true);
+            return;
         }
+        // 提交成功后把问题 ID 记进轮次文件，兄弟账号下次据此回答，自己下次据此采纳。
+        task.pipeline().recordNewQuestion(task.currentUserId());
     }
 
     private boolean submitQuestion(String title, String content) {

@@ -207,6 +207,8 @@ public class SiemensCheckInTask extends CheckInTask {
     private final Set<String> handled = new HashSet<>();
     /** 预制内容库，懒加载。 */
     private volatile ContentBank contentBank;
+    /** 三账号互相配合的轮次文件，懒加载。 */
+    private volatile SiemensPipeline pipeline;
     /** 指向真实站点时才复用并保存会话，测试用的假站点不落盘。 */
     private final boolean sessionReuseEnabled;
 
@@ -477,6 +479,13 @@ public class SiemensCheckInTask extends CheckInTask {
         }
         System.out.println("[西门子] 待完成每日任务：" + pending);
         refillContentBanks(pending);
+        // 三个账号互相当托的闭环：先登记并采纳兄弟账号的回答，再做本站的问答类任务。
+        String myUid = currentUserId;
+        try {
+            pipeline().beforeDailyTasks(myUid);
+        } catch (Exception e) {
+            System.out.println("[西门子] 轮次协同准备失败，按单账号流程继续：" + e.getMessage());
+        }
         SiemensForumActions forum = new SiemensForumActions(this);
         SiemensAnswerActions answer = new SiemensAnswerActions(this);
         String questionId = null;
@@ -1395,6 +1404,14 @@ public class SiemensCheckInTask extends CheckInTask {
             contentBank = new ContentBank(this, stateDir().resolve("siemens-content-bank.json"));
         }
         return contentBank;
+    }
+
+    /** 三账号互相配合的轮次文件，懒加载。 */
+    SiemensPipeline pipeline() {
+        if (pipeline == null) {
+            pipeline = new SiemensPipeline(this);
+        }
+        return pipeline;
     }
 
     String currentUserId() {
