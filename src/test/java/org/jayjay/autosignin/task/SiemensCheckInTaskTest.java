@@ -333,6 +333,28 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void readsQuestionTitleFromCurrentMarkup() {
+        // 站点改版后详情页标题在 h1，老页面是 h4.singleLine，两个都要能取到。
+        assertEquals("报表脚本解析",
+                SiemensAnswerActions.firstElementText("<html><h1>报表脚本解析</h1></html>", "h1", "h4.singleLine"));
+        assertEquals("老页面标题",
+                SiemensAnswerActions.firstElementText("<html><h4 class=\"singleLine\">老页面标题</h4></html>",
+                        "h1", "h4.singleLine"));
+        // 都取不到时必须返回 null，让调用方走兜底，而不是把 null 塞进提示词。
+        assertEquals(null, SiemensAnswerActions.firstElementText("<html></html>", "h1", "h4.singleLine"));
+        assertEquals(null, SiemensAnswerActions.firstElementText(null, "h1"));
+    }
+
+    @Test
+    public void stripsHtmlFromAnswerText() {
+        // 列表接口的最佳答案正文是带标签的 HTML，喂给模型前要清掉。
+        assertEquals("先看物理层 再查程序",
+                SiemensAnswerActions.plainText("<p>先看物理层</p><p>再查程序</p>", 50));
+        assertEquals("", SiemensAnswerActions.plainText(null, 50));
+        assertEquals(5, SiemensAnswerActions.plainText("一二三四五六七八", 5).length());
+    }
+
+    @Test
     public void recognizesNewUserPostQuotaMessage() {
         // 新注册账号当日主贴上限，站点文案是「新注册用户当日主贴数量不能超过2个」。
         assertTrue(SiemensForumActions.isQuotaLimited("新注册用户当日主贴数量不能超过2个，请稍候重试！"));

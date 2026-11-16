@@ -153,24 +153,42 @@ final class SiemensAnswerActions {
 
     /** 回答一条待解决问题。跳过自己提的问题，站点禁止自问自答。 */
     void answerQuestion() {
-        String target = null;
+        // 列表接口自带标题和正文，直接用；取不到标题就不回答，避免把空主题喂给模型。
+        String questionId = null;
+        String categoryId = null;
+        String questionTitle = null;
+        String questionBody = null;
         for (String candidate : unsolvedQuestions(FAVORITE_CANDIDATES)) {
-            String asker = candidate.substring(candidate.lastIndexOf('-') + 1);
-            if (StrUtil.isBlank(task.currentUserId()) || !task.currentUserId().equals(asker)) {
-                target = candidate.substring(0, candidate.lastIndexOf('-'));
-                break;
+            // 格式：questionId-categoryId-askerId-标题-正文，标题和正文里可能含分隔符，所以限定段数。
+            String[] parts = candidate.split("-", 5);
+            if (parts.length < 3) {
+                continue;
             }
+            String asker = parts[2];
+            if (StrUtil.isNotBlank(task.currentUserId()) && task.currentUserId().equals(asker)) {
+                continue;
+            }
+            questionId = parts[0];
+            categoryId = parts[1];
+            questionTitle = parts.length > 3 ? parts[3] : null;
+            questionBody = parts.length > 4 ? parts[4] : null;
+            break;
         }
-        if (StrUtil.isBlank(target)) {
+        if (StrUtil.isBlank(questionId)) {
             System.out.println("[西门子] 没有待回答的问题");
             return;
         }
-        String questionId = target.substring(0, target.indexOf('-'));
-        String categoryId = target.substring(target.indexOf('-') + 1);
-        String prompt = "请用中文回答西门子找答案里的一个技术问题，问题标题是："
-                + questionTitle(questionId, categoryId)
-                + "。回答要具体、可执行，200字以内，不要标题，不要分点。";
-        String answer = task.generateUnique(prompt, "answer");
+        String answer;
+        if (StrUtil.isBlank(questionTitle)) {
+            System.out.println("[西门子] 拿不到问题标题，改用内置回答：" + questionId);
+            answer = task.fallbackContent("answer");
+        } else {
+            String prompt = "请用中文回答西门子找答案里的一个技术问题，问题标题是："
+                    + questionTitle
+                    + (StrUtil.isBlank(questionBody) ? "" : "。问题描述：" + questionBody)
+                    + "。回答要具体、可执行，200字以内，不要标题，不要分点。";
+            answer = task.generateUnique(prompt, "answer");
+        }
         if (StrUtil.isBlank(answer)) {
             return;
         }
@@ -191,12 +209,21 @@ final class SiemensAnswerActions {
             System.out.println("[西门子] 没有找到带最佳答案的问题");
             return;
         }
-        String[] parts = solved.split("-");
+        String[] parts = solved.split("-", 4);
         String questionId = parts[0];
         String categoryId = parts[1];
         String answerId = parts[2];
-        String comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
-                + "评论要结合答案内容补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+        String answerText = parts.length > 3 ? parts[3] : null;
+        String comment;
+        if (StrUtil.isBlank(answerText)) {
+            // 没有答案原文时写不出「结合答案补充经验」，改用内置文案，避免模型反过来索要内容。
+            System.out.println("[西门子] 拿不到最佳答案内容，改用内置评论：" + answerId);
+            comment = task.fallbackContent("bestcomment");
+        } else {
+            comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
+                    + "最佳答案的原文是：" + answerText
+                    + "。评论要结合这段答案补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+        }
         if (StrUtil.isBlank(comment)) {
             return;
         }
@@ -319,7 +346,7 @@ final class SiemensAnswerActions {
         return result;
     }
 
-    /** 取未解决问题列表，返回 questionId-categoryId-askerId，最多 limit 条。 */
+    /** 取未解决问题列表，返回 questionId-categoryId-标题-正文，最多 limit 条。 */
     private List<String> unsolvedQuestions(int limit) {
         List<String> result = new ArrayList<>();
         // t 为空（或 0）才是「待解决问题」；t=1 起是「新解决的问题」，两者不能混用。
@@ -335,7 +362,10 @@ final class SiemensAnswerActions {
             if (item == null || StrUtil.isBlank(item.getStr("Q_ID"))) {
                 continue;
             }
-            result.add(item.getStr("Q_ID") + "-" + item.getStr("C_ID") + "-" + item.getStr("U_ID"));
+            result.add(item.getStr("Q_ID") + "-" + item.getStr("C_ID") + "-"
+                    + StrUtil.blankToDefault(item.getStr("U_ID"), "") + "-"
+                    + StrUtil.blankToDefault(item.getStr("Q_Title"), "") + "-"
+                    + plainText(item.getStr("Q_Content"), 300));
         }
         return result;
     }
@@ -345,6 +375,7 @@ final class SiemensAnswerActions {
      * 必须带 t=1（新解决的问题），否则接口按默认的待解决列表返回，永远找不到最佳答案。
      * <p>
      * 按账号序号跳过前 N 条可评的答案，多个容器并行时才不会都扑在同一条上。
+     * 返回 questionId-categoryId-answerId-答案正文，答案正文用于生成评论；取不到时第四段为空。
      */
     private String firstSolvedQuestionWithBestAnswer() {
         int skip = task.accountIndex();
@@ -367,7 +398,8 @@ final class SiemensAnswerActions {
                 String answerId = detail == null ? null
                         : SiemensCheckInTask.attributeValue(detail.body, "data-bestanswerid");
                 if (StrUtil.isNotBlank(answerId) && !"0".equals(answerId)) {
-                    candidates.add(questionId + "-" + categoryId + "-" + answerId);
+                    candidates.add(questionId + "-" + categoryId + "-" + answerId
+                            + "-" + plainText(item.getStr("A_Content"), 200));
                 }
             }
         }
@@ -378,21 +410,35 @@ final class SiemensAnswerActions {
         return candidates.get(Math.min(skip, candidates.size() - 1));
     }
 
-    private String questionTitle(String questionId, String categoryId) {
-        SiemensCheckInTask.Page detail = task.follow(
-                task.supportBaseUrl() + "/service/answer/solve_" + questionId + "_" + categoryId + ".html");
-        return detail == null ? "西门子产品使用问题"
-                : SiemensCheckInTask.readableText(
-                        Jsoup.parse(detail.body).selectFirst("h4.singleLine") == null
-                                ? null
-                                : Jsoup.parse(detail.body).selectFirst("h4.singleLine").text());
+    /** 依次尝试多个选择器，取第一个有文字的结果。 */
+    static String firstElementText(String html, String... selectors) {
+        if (StrUtil.isBlank(html)) {
+            return null;
+        }
+        org.jsoup.nodes.Document document = Jsoup.parse(html);
+        for (String selector : selectors) {
+            org.jsoup.nodes.Element element = document.selectFirst(selector);
+            String text = element == null ? null : StrUtil.trim(element.text());
+            if (StrUtil.isNotBlank(text)) {
+                return text;
+            }
+        }
+        return null;
+    }
+
+    /** 去掉接口返回正文里的 HTML 标签，截到指定长度，供提示词使用。 */
+    static String plainText(String html, int maxLength) {
+        if (StrUtil.isBlank(html)) {
+            return "";
+        }
+        String text = Jsoup.parse(html).text().replaceAll("\\s+", " ").trim();
+        return text.length() <= maxLength ? text : text.substring(0, maxLength);
     }
 
     private String latestQuestionId() {
         List<String> candidates = unsolvedQuestions(1);
         return candidates.isEmpty() ? null : candidates.get(0).substring(0, candidates.get(0).indexOf('-'));
     }
-
     private static JSONArray questionList(JSONObject body) {
         return body == null ? null : body.getJSONArray("QuestionListForNewList");
     }

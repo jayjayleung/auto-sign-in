@@ -154,12 +154,23 @@ final class SiemensForumActions {
         int split = postId.indexOf('-');
         String articleId = split > 0 ? postId.substring(0, split) : postId;
         String boardId = split > 0 ? postId.substring(split + 1) : BOARD_ID;
-        String content = task.generateUnique("请用中文写一段西门子技术论坛的回帖，"
-                + "针对 S7-300 升级到 S7-1500 的选型讨论补充一条实用建议，150字以内，口语，不要分点。", "reply");
+        String[] topic = postTopic(articleId, boardId);
+        String content;
+        String title;
+        if (topic == null) {
+            System.out.println("[西门子] 拿不到原帖内容，回帖改用内置文案：" + articleId);
+            content = task.fallbackContent("reply");
+            title = "回复：升级选型讨论";
+        } else {
+            content = task.generateUnique("请用中文写一段西门子技术论坛的回帖，回复的原帖标题是："
+                    + topic[0] + "。原帖内容：" + topic[1]
+                    + "。回帖要贴着原帖的话题接话，150字以内，口语，不要分点。", "reply");
+            title = StrUtil.isBlank(topic[0]) ? "回复：技术讨论" : "回复：" + topic[0];
+        }
         if (StrUtil.isBlank(content)) {
             return;
         }
-        submitPost(articleId, boardId, TYPE_DISCUSS, "回复：升级选型讨论", content, "0");
+        submitPost(articleId, boardId, TYPE_DISCUSS, SiemensCheckInTask.cleanTitle(title), content, "0");
     }
 
     /** 评论帖子。跳过自己和已经评论过的帖子，否则站点直接回 false。 */
@@ -195,8 +206,16 @@ final class SiemensForumActions {
         int split = postId.indexOf('-');
         String articleId = postId.substring(0, split);
         String boardId = postId.substring(split + 1);
-        String content = task.generateUnique(
-                "请用中文写一条西门子技术论坛的短评论，60字以内，一句到两句，口语，不要分点。", "postcomment");
+        String[] topic = postTopic(articleId, boardId);
+        String content;
+        if (topic == null) {
+            System.out.println("[西门子] 拿不到原帖内容，评论改用内置文案：" + articleId);
+            content = task.fallbackContent("postcomment");
+        } else {
+            content = task.generateUnique("请用中文写一条西门子技术论坛的短评论，针对的帖子标题是："
+                    + topic[0] + "。帖子内容：" + topic[1]
+                    + "。60字以内，一句到两句，回帖要贴合这个主题，口语，不要分点。", "postcomment");
+        }
         if (StrUtil.isBlank(content)) {
             return;
         }
@@ -371,5 +390,33 @@ final class SiemensForumActions {
         }
         Matcher matcher = Pattern.compile("user_disp\\.aspx\\?u_id=(\\d+)").matcher(page.body);
         return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /**
+     * 取原帖的标题和正文摘要，供回帖和评论时贴合主题。
+     * 详情页标题在 &lt;title&gt;（「标题-技术论坛-…」），正文在 div.articlecontent；
+     * 取不到时返回 null，调用方改用内置文案，避免把空主题喂给模型。
+     * 返回 {标题, 正文摘要}，任一段可能是空串。
+     */
+    private String[] postTopic(String articleId, String boardId) {
+        SiemensCheckInTask.Page page = task.follow(
+                task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
+        if (page == null) {
+            return null;
+        }
+        String title = SiemensCheckInTask.readableText(SiemensAnswerActions.firstElementText(page.body, "title"));
+        if (StrUtil.isNotBlank(title)) {
+            // 页面标题带站名后缀，只留真正的帖子标题。
+            int cut = title.indexOf("-技术论坛");
+            if (cut > 0) {
+                title = title.substring(0, cut).trim();
+            }
+        }
+        String body = SiemensAnswerActions.firstElementText(page.body, "div.articlecontent");
+        String summary = StrUtil.isBlank(body) ? "" : SiemensAnswerActions.plainText(body, 200);
+        if (StrUtil.isBlank(title) && StrUtil.isBlank(summary)) {
+            return null;
+        }
+        return new String[]{StrUtil.blankToDefault(title, ""), summary};
     }
 }
