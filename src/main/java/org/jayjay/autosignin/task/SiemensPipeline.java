@@ -93,14 +93,18 @@ final class SiemensPipeline {
 
     /**
      * 评论一条兄弟账号产出的最佳答案，成功返回 true。
-     * 没有可评的轮次时返回 false，调用方再退回站上随机找已解决的问答。
+     * 评论内容由调用方按该条答案的原文生成：不同答案讨论的问题完全不同，
+     * 用一句通用评论会答非所问，也是之前被判「非原创」的同类问题。
+     *
+     * @param commentFor 收到答案原文，返回针对它写的评论；返回空表示放弃这条
      */
-    boolean commentSiblingAnswer(String myUid, String comment) {
-        if (StrUtil.isBlank(myUid) || StrUtil.isBlank(comment)) {
+    boolean commentSiblingAnswer(String myUid, java.util.function.Function<String, String> commentFor) {
+        if (StrUtil.isBlank(myUid)) {
             return false;
         }
         load();
         JSONArray rounds = store.getJSONArray("rounds");
+        boolean hasCandidate = false;
         for (int i = 0; i < rounds.size(); i++) {
             JSONObject round = rounds.getJSONObject(i);
             if (round == null || !Boolean.TRUE.equals(round.getBool("adopted"))) {
@@ -117,6 +121,8 @@ final class SiemensPipeline {
             if (alreadyCommented(round, myUid)) {
                 continue;
             }
+            hasCandidate = true;
+            // 间隔检查放在确认有候选之后：没有候选时不必打这条日志。
             if (!siblingCommentAllowed(myUid)) {
                 System.out.println("[西门子] 距上次互评不足 "
                         + (SIBLING_COMMENT_INTERVAL_DAYS - 1) + " 天，今天不互评，改评站上问答");
@@ -129,6 +135,11 @@ final class SiemensPipeline {
                 markCommented(round, myUid);
                 continue;
             }
+            String answerText = answerText(qid, aid);
+            String comment = commentFor.apply(answerText);
+            if (StrUtil.isBlank(comment)) {
+                continue;
+            }
             if (postComment(qid, cid, aid, comment)) {
                 markCommented(round, myUid);
                 markSiblingComment(myUid);
@@ -136,7 +147,22 @@ final class SiemensPipeline {
                 return true;
             }
         }
+        if (!hasCandidate) {
+            System.out.println("[西门子] 轮次里没有可互评的答案，改评站上问答");
+        }
         return false;
+    }
+
+    /** 取某条回答的正文，用于生成贴合内容的评论；取不到返回空串。 */
+    private String answerText(String qid, String aid) {
+        JSONArray answers = answers(qid);
+        for (int i = 0; i < answers.size(); i++) {
+            JSONObject item = answers.getJSONObject(i);
+            if (item != null && aid.equals(item.getStr("A_ID"))) {
+                return SiemensAnswerActions.plainText(item.getStr("A_Content"), 200);
+            }
+        }
+        return "";
     }
 
     /** 挑一条兄弟账号提的、还没人回答的问题，返回 {qid, cid}；没有就返回 null。 */
@@ -259,8 +285,16 @@ final class SiemensPipeline {
     /**
      * 提交采纳。站点入口是弹窗页 question_answercomment.aspx，表单实际提交到
      * solution_P.aspx?PType=ba，成功后 302 跳转到 sysmessage.aspx。
+     * <p>
+     * 这里再校验一次回答者必须是已登记的兄弟账号：采纳是不可撤销的动作，
+     * 不能因为上层传错参数就替自己采纳了陌生人的答案。
      */
     private boolean adopt(String qid, String cid, String aid, String answererUid) {
+        if (StrUtil.isBlank(qid) || StrUtil.isBlank(cid) || StrUtil.isBlank(aid)
+                || StrUtil.isBlank(answererUid) || !accountIds().contains(answererUid)) {
+            System.out.println("[西门子] 采纳参数不合法，跳过：" + qid + "/" + aid);
+            return false;
+        }
         String pageUrl = task.supportBaseUrl() + "/service/answer/question_answercomment.aspx"
                 + "?ba_uid=" + answererUid + "&A_ID=" + aid + "&Q_ID=" + qid
                 + "&cid=" + cid + "&ba_reward=1&overdue=N";
@@ -417,6 +451,8 @@ final class SiemensPipeline {
     /**
      * 把自己名下已回答但还没采纳的问题补进轮次文件。
      * 这一步让功能上线后立刻能用上历史问答，不依赖轮次文件从第一天开始积累。
+     * 只处理最近的 {@link #DISCOVER_LIMIT} 条：每条都要额外请求回答列表，
+     * 全量扫描会在账号积累很多提问后连着打几十个请求，容易触发风控。
      */
     private void discoverOwnQuestions(String myUid) {
         List<String[]> own = ownQuestions();
@@ -425,12 +461,18 @@ final class SiemensPipeline {
         }
         load();
         JSONArray rounds = store.getJSONArray("rounds");
+        int added = 0;
         for (String[] item : own) {
+            if (added >= DISCOVER_LIMIT) {
+                System.out.println("[西门子] 历史问答已扫描 " + added + " 条，其余留给后续轮次");
+                break;
+            }
             String qid = item[0];
             String cid = item[1];
             if (findRound(rounds, qid) != null) {
                 continue;
             }
+            added++;
             JSONArray answers = answers(qid);
             JSONObject mine = null;
             for (int i = 0; i < answers.size(); i++) {
@@ -519,19 +561,17 @@ final class SiemensPipeline {
         return null;
     }
 
-    /** 我刚提交的回答：同一条问题下自己的、输入时间是今天的最大 A_ID。 */
+    /** 我刚提交的回答：同一条问题下自己 A_ID 最大的那条（A_ID 单调递增）。 */
     private JSONObject newestOwnAnswer(String qid, String myUid) {
         JSONArray answers = answers(qid);
-        String today = LocalDate.now(SHANGHAI).toString();
         JSONObject newest = null;
         for (int i = 0; i < answers.size(); i++) {
             JSONObject item = answers.getJSONObject(i);
             if (item == null || !myUid.equals(item.getStr("U_ID"))) {
                 continue;
             }
-            if (!today.equals(dateOf(item.getStr("A_InputTime")))) {
-                continue;
-            }
+            // 不按「今天」过滤：任务可能跨过零点（AI 生成慢、间隔等待），
+            // 按日期比会把刚提交的回答丢掉，导致提问方永远等不到可采纳的答案。
             if (newest == null || parseInt(item.getStr("A_ID")) > parseInt(newest.getStr("A_ID"))) {
                 newest = item;
             }
@@ -608,6 +648,13 @@ final class SiemensPipeline {
             rounds.remove(0);
         }
     }
+
+    /**
+     * 发现历史问答时最多处理几条。
+     * 「我的提问」里每一条都要额外请求一次回答列表，条目多了会连着打几十个请求，
+     * 容易触发站点风控。这里只看最近的几条，其余交给轮次文件逐轮积累。
+     */
+    private static final int DISCOVER_LIMIT = 5;
 
     /** 把 /Date(毫秒)/ 转成北京时间的日期，解析不出返回空串。 */
     static String dateOf(String raw) {

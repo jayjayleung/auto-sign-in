@@ -228,10 +228,17 @@ final class SiemensAnswerActions {
     /** 评论一条已采纳的最佳答案。 */
     void commentBestAnswer() {
         // 优先评论兄弟账号刚被采纳的答案：这条链路是确定的，不依赖站上随机出现的新问答。
-        String comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
-                + "最佳答案讨论的是 S7-1500 的组态与通讯问题"
-                + "。评论要补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
-        if (StrUtil.isNotBlank(comment) && task.pipeline().commentSiblingAnswer(task.currentUserId(), comment)) {
+        // 评论按该条答案的原文生成，不能套用通用措辞，否则和评论区其他内容一样会答非所问。
+        boolean done = task.pipeline().commentSiblingAnswer(task.currentUserId(), answerText -> {
+            if (StrUtil.isBlank(answerText)) {
+                System.out.println("[西门子] 拿不到互评答案的原文，改用内置评论");
+                return task.fallbackContent("bestcomment");
+            }
+            return task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
+                    + "最佳答案的原文是：" + answerText
+                    + "。评论要结合这段答案补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+        });
+        if (done) {
             return;
         }
         String solved = firstSolvedQuestionWithBestAnswer();
@@ -244,6 +251,7 @@ final class SiemensAnswerActions {
         String categoryId = parts[1];
         String answerId = parts[2];
         String answerText = parts.length > 3 ? parts[3] : null;
+        String comment;
         if (StrUtil.isBlank(answerText)) {
             // 没有答案原文时写不出「结合答案补充经验」，改用内置文案，避免模型反过来索要内容。
             System.out.println("[西门子] 拿不到最佳答案内容，改用内置评论：" + answerId);

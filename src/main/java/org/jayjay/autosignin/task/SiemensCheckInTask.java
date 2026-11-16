@@ -573,7 +573,10 @@ public class SiemensCheckInTask extends CheckInTask {
             } else if (lastTaskSkipped) {
                 // 额度受限不是失败，但也不能算已完成：重置熔断计数并单独记录。
                 consecutiveFailures = 0;
-                quotaLimited.add(code);
+                if (!(TASK_PUBLISH_STORY.equals(code) && storySkipped)) {
+                    // 按配置关闭的故事帖不算额度受限，否则通知会误报「明天会重试」。
+                    quotaLimited.add(code);
+                }
             } else {
                 consecutiveFailures = 0;
                 handled.add(code);
@@ -634,6 +637,10 @@ public class SiemensCheckInTask extends CheckInTask {
      * 把剩余任务拼成通知文案。
      * 只有本次确实提交成功的故事帖才算已处理，失败时仍要出现在未完成列表里；
      * 主动关掉故事帖开关时不算未完成，单独说明一句。
+     */
+    /**
+     * 三个参数的重载：故事帖开关默认视为打开，等价于 {@code storySkipped=false}。
+     * 保留它是为了单元测试读起来更直白，正式流程一律走四参版本。
      */
     static String remainingText(List<String> pending, boolean submittedStory, String aborted) {
         return remainingText(pending, submittedStory, aborted, false);

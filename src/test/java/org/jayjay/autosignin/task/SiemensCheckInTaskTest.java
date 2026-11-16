@@ -410,6 +410,41 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void siblingCommentUsesTheActualAnswerText() throws Exception {
+        // 互评必须按该条答案的原文生成，不能套用通用措辞——否则和评论区内容对不上。
+        // 这里验证取答案原文的兜底路径：拿不到时返回空串，由调用方改用内置文案。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("pipeline");
+        java.nio.file.Path file = dir.resolve(SiemensPipeline.FILE_NAME);
+        try {
+            java.lang.reflect.Constructor<SiemensPipeline> ctor =
+                    SiemensPipeline.class.getDeclaredConstructor(SiemensCheckInTask.class);
+            ctor.setAccessible(true);
+            SiemensPipeline pipeline = ctor.newInstance(task);
+            java.lang.reflect.Field field = SiemensPipeline.class.getDeclaredField("file");
+            field.setAccessible(true);
+            field.set(pipeline, file);
+
+            java.lang.reflect.Method answersMethod =
+                    SiemensPipeline.class.getDeclaredMethod("answerText", String.class, String.class);
+            answersMethod.setAccessible(true);
+            // 本地假站点没有问答接口，取不到原文时必须返回空串而不是 null，调用方据此兜底。
+            assertEquals("", answersMethod.invoke(pipeline, "999999", "1"));
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+            java.nio.file.Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
+    public void skippingStoryDoesNotReportQuotaLimit() {
+        // 按配置关闭的故事帖不能当成「额度受限」，否则通知会误报明天重试。
+        List<String> pending = Collections.singletonList("NewMySupport_BBSPostStoryArticle");
+        assertEquals("已全部完成（故事帖已按配置关闭）",
+                SiemensCheckInTask.remainingText(pending, false, null, true));
+    }
+
+    @Test
     public void parsesSiteDateMillis() {
         // 站点接口的时间是 /Date(毫秒)/，要能转成北京时间的日期。
         assertEquals("2026-11-16", SiemensPipeline.dateOf("/Date(1794791942350)/"));
