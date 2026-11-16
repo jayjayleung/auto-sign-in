@@ -44,6 +44,12 @@ public class SiemensCheckInTask extends CheckInTask {
     static final String PASSWORD_KEY = "SIEMENS_PASSWORD";
     /** 设为 false 可以只签到、不执行发帖类每日任务。 */
     static final String DAILY_TASKS_KEY = "SIEMENS_DAILY_TASKS";
+    /**
+     * 设为 false 时跳过故事帖任务。
+     * 故事帖要站点人工审核，AI 生成的内容常被判「非原创」驳回，
+     * 想彻底不投就关掉这个开关，其余每日任务照常执行。
+     */
+    static final String STORY_POST_KEY = "SIEMENS_STORY_POST";
 
     private static final String DEFAULT_SUPPORT_BASE_URL = "https://www.ad.siemens.com.cn";
     private static final String LOGIN_API_PATH = "/api/bff/v1.2/developer/ciam/login/pwd";
@@ -201,6 +207,8 @@ public class SiemensCheckInTask extends CheckInTask {
     private boolean lastTaskFailed;
     /** 本次任务被站点额度挡住，既不算成功也不算失败。 */
     private boolean lastTaskSkipped;
+    /** 本次运行是否按配置主动跳过了故事帖。 */
+    private boolean storySkipped;
     /** 被额度挡下的任务，通知里单独说明，避免误报成「已提交待审核」。 */
     private final Set<String> quotaLimited = new HashSet<>();
     /** 本次运行已经处理过的任务代码。 */
@@ -457,6 +465,19 @@ public class SiemensCheckInTask extends CheckInTask {
         return dailyTasksByDefault;
     }
 
+    /**
+     * 故事帖开关，默认开启。
+     * 站点对故事帖人工审核，AI 生成内容常被判非原创，想彻底不投时设
+     * SIEMENS_STORY_POST=false，其余每日任务不受影响。
+     */
+    private boolean storyPostEnabled() {
+        String flag = environment == null ? null : environment.get(STORY_POST_KEY);
+        if (StrUtil.isBlank(flag)) {
+            return true;
+        }
+        return !"false".equalsIgnoreCase(flag.trim());
+    }
+
     /** 把剩下的每日任务做掉，逐项独立执行，某一项失败不影响其他项。 */
     private void completeDailyTasks() {
         if (alreadyRanToday()) {
@@ -524,7 +545,14 @@ public class SiemensCheckInTask extends CheckInTask {
                 } else if (TASK_PUBLISH_POST.equals(code)) {
                     forum.publishPost();
                 } else if (TASK_PUBLISH_STORY.equals(code)) {
-                    forum.publishStory();
+                    if (storyPostEnabled()) {
+                        forum.publishStory();
+                    } else {
+                        // 主动关掉的项不算失败，也不该出现在未完成里，单独记一笔即可。
+                        System.out.println("[西门子] 故事帖开关已关闭，跳过");
+                        lastTaskSkipped = true;
+                        storySkipped = true;
+                    }
                 } else if (TASK_ASK.equals(code)) {
                     answer.askQuestion();
                 } else {
@@ -571,7 +599,7 @@ public class SiemensCheckInTask extends CheckInTask {
         if (pending.contains(TASK_PUBLISH_POST)) {
             bank.refillIfLow(ContentBank.POST, deadline);
         }
-        if (pending.contains(TASK_PUBLISH_STORY)) {
+        if (pending.contains(TASK_PUBLISH_STORY) && storyPostEnabled()) {
             bank.refillIfLow(ContentBank.STORY, deadline);
         }
     }
@@ -595,7 +623,7 @@ public class SiemensCheckInTask extends CheckInTask {
             return;
         }
         String text = remainingText(pendingDailyTasks(tasks),
-                handled.contains(TASK_PUBLISH_STORY), aborted);
+                handled.contains(TASK_PUBLISH_STORY), aborted, storySkipped);
         if (!quotaLimited.isEmpty()) {
             text = text + "（受站点每日主贴上限限制，明天会重试）";
         }
@@ -604,11 +632,17 @@ public class SiemensCheckInTask extends CheckInTask {
 
     /**
      * 把剩余任务拼成通知文案。
-     * 只有本次确实提交成功的故事帖才算已处理，失败时仍要出现在未完成列表里。
+     * 只有本次确实提交成功的故事帖才算已处理，失败时仍要出现在未完成列表里；
+     * 主动关掉故事帖开关时不算未完成，单独说明一句。
      */
     static String remainingText(List<String> pending, boolean submittedStory, String aborted) {
+        return remainingText(pending, submittedStory, aborted, false);
+    }
+
+    static String remainingText(List<String> pending, boolean submittedStory, String aborted,
+                                boolean storySkipped) {
         List<String> left = new ArrayList<>(pending == null ? new ArrayList<>() : pending);
-        if (submittedStory) {
+        if (submittedStory || storySkipped) {
             left.remove(TASK_PUBLISH_STORY);
         }
         List<String> names = new ArrayList<>();
@@ -616,7 +650,11 @@ public class SiemensCheckInTask extends CheckInTask {
             names.add(taskDisplayName(code));
         }
         if (names.isEmpty() && aborted == null) {
-            return submittedStory ? "已全部完成，故事帖待审核" : "已全部完成";
+            String text = submittedStory ? "已全部完成，故事帖待审核" : "已全部完成";
+            if (storySkipped) {
+                text = text + "（故事帖已按配置关闭）";
+            }
+            return text;
         }
         StringBuilder text = new StringBuilder();
         if (aborted != null) {

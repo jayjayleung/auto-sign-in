@@ -472,6 +472,48 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void storySwitchOffIsNotReportedAsUnfinished() {
+        List<String> pending = Arrays.asList("NewMySupport_FAQuestion",
+                "NewMySupport_BBSPostStoryArticle");
+
+        // 关掉故事帖开关后，剩余项里不该再出现它，也不该说「未完成」。
+        assertEquals("未完成 [找答案提问]",
+                SiemensCheckInTask.remainingText(pending, false, null, true));
+        // 只剩故事帖时直接报完成，并注明是按配置关闭。
+        assertEquals("已全部完成（故事帖已按配置关闭）",
+                SiemensCheckInTask.remainingText(Collections.singletonList("NewMySupport_BBSPostStoryArticle"),
+                        false, null, true));
+        // 开关打开时行为不变。
+        assertEquals("未完成 [论坛发故事帖]",
+                SiemensCheckInTask.remainingText(Collections.singletonList("NewMySupport_BBSPostStoryArticle"),
+                        false, null, false));
+    }
+
+    @Test
+    public void storySwitchDefaultsToEnabled() {
+        // 留空或没配时默认发故事帖，只有显式 false 才跳过。
+        SiemensCheckInTask defaultOn = new SiemensCheckInTask(environment(), baseUrl);
+        assertTrue(storyPostEnabled(defaultOn));
+        Map<String, String> off = environment();
+        off.put("SIEMENS_STORY_POST", "false");
+        assertFalse(storyPostEnabled(new SiemensCheckInTask(off, baseUrl)));
+        Map<String, String> on = environment();
+        on.put("SIEMENS_STORY_POST", "true");
+        assertTrue(storyPostEnabled(new SiemensCheckInTask(on, baseUrl)));
+    }
+
+    private static boolean storyPostEnabled(SiemensCheckInTask task) {
+        try {
+            java.lang.reflect.Method method =
+                    SiemensCheckInTask.class.getDeclaredMethod("storyPostEnabled");
+            method.setAccessible(true);
+            return (Boolean) method.invoke(task);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    @Test
     public void fallsBackToBuiltInContentWhenAiUnavailable() {
         Map<String, String> environment = environment();
         SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);
