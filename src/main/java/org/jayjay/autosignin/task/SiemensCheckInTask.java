@@ -513,11 +513,8 @@ public class SiemensCheckInTask extends CheckInTask {
             List<String[]> reviews = forum.readStoryReviews();
             if (!reviews.isEmpty()) {
                 forum.markRejectedStories(reviews);
-                List<String> parts = new ArrayList<>();
-                for (String[] review : reviews) {
-                    parts.add("「" + review[0] + "」" + review[1]);
-                }
-                addMessage("故事审核：", String.join("；", parts));
+                // 只报汇总，不逐条列标题：积压时逐条列会把通知拉得很长。
+                addMessage("故事审核：", SiemensForumActions.summarizeReviews(reviews));
             }
         } catch (Exception e) {
             System.out.println("[西门子] 读取故事审核结果失败：" + e.getMessage());

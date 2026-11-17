@@ -29,6 +29,12 @@ final class SiemensForumActions {
     private static final String STORY_SORT_ID = "123";
     /** 消息中心里的故事审核通知标题，驳回和转普通帖都会发一条。 */
     private static final String REVIEW_NOTICE_TITLE = "故事审核通知";
+    /**
+     * 单次最多读取几条审核通知。
+     * 记录被清空或首次运行时站上会积压一批历史通知，全读一遍会拉出一长串无关结果，
+     * 超出的直接标记已处理。
+     */
+    private static final int REVIEW_RECENT_LIMIT = 3;
     /** 审核通知的正文是「您提交的故事“标题”未通过审核,未通过原因：xxx」。 */
     private static final Pattern STORY_REVIEW = Pattern.compile(
             "您提交的故事[“\"]([^”\"]+)[”\"](?:未通过审核[,，]未通过原因[:：]([^。]+)|(被转换为普通帖))");
@@ -277,13 +283,12 @@ final class SiemensForumActions {
             System.out.println("[西门子] 故事帖使用内容库：" + title);
         } else {
             title = task.generateUnique(
-                    "请用中文给西门子技术论坛想一个现场经历故事标题，要具体到这次经历的特征，"
-                            + "不要用「一次…」「记一次…」这类泛泛开头，15字以内，只输出标题。", "storytitle");
+                    "请用中文给西门子技术论坛想一个技术分享帖标题，格式必须是「【分享】」加具体技术点，"
+                            + "例如「【分享】V90 回零偏移排查」，20字以内，只输出标题。", "storytitle");
             content = task.generateUnique(
-                    "请用中文写一篇西门子技术论坛的故事帖，第一人称讲自己亲历的一次现场调试："
-                            + "开头交代时间和现场氛围，必须写出具体的硬件型号、软件版本、报警代码或测量数值，"
-                            + "写清楚先怀疑了什么、怎么发现判断错了、真正原因是什么，最后写这次之后改了什么习惯。"
-                            + "细节要独一无二，不要写「网线松动」「设备名冲突」「接地不良」这类通用桥段，"
+                    "请用中文写一篇西门子技术论坛的技术复盘帖，按「现象 → 排查顺序 → 定位依据 → 结论」写，"
+                            + "带上报警代码、诊断缓冲区原文或测量数值，写清每一步的判断依据，"
+                            + "型号和参数名要符合西门子真实产品体系，不要编造订货号。"
                             + "350字以内，不要分点，不要引用来源，不要出现真实人名和公司名。", "storybody");
         }
         if (StrUtil.isBlank(title) || StrUtil.isBlank(content)) {
@@ -400,6 +405,8 @@ final class SiemensForumActions {
      * 故事帖提交后要等审核，结果以站内消息下发，可能是「未通过审核」（附原因），
      * 也可能是「被转换为普通帖发布」，后者说明内容被判成普通帖，同样不计入故事帖任务。
      * 已处理过的通知记在 state 目录，避免每天重复上报同一批结果。
+     * 首次运行或清过记录时站上会积压大量历史通知，这里只取最近的
+     * {@link #REVIEW_RECENT_LIMIT} 条，否则一次推送会列出十几条无关结果。
      * 返回 {标题, 结论} 列表，拿不到时返回空列表。
      */
     List<String[]> readStoryReviews() {
@@ -417,7 +424,21 @@ final class SiemensForumActions {
                 ids.add(link.group(1));
             }
         }
-        for (String id : ids) {
+        // 消息列表按时间倒序，超出的历史通知不再逐条抓详情，但标题仍要记为作废，
+        // 否则那些被驳回的内容还能从内容库里被取出来重投。
+        List<String> recent = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i < REVIEW_RECENT_LIMIT) {
+                recent.add(ids.get(i));
+            } else {
+                String title = reviewTitle(ids.get(i));
+                if (StrUtil.isNotBlank(title)) {
+                    task.contentBank().markRejected(ContentBank.STORY, title);
+                }
+                task.markReviewHandled(ids.get(i));
+            }
+        }
+        for (String id : recent) {
             SiemensCheckInTask.Page detail = task.follow(
                     task.supportBaseUrl() + "/MySupport/MyMsgDetail.aspx?noticeId=" + id);
             if (detail == null || detail.body == null) {
@@ -437,6 +458,54 @@ final class SiemensForumActions {
             reviews.add(new String[]{title, result});
         }
         return reviews;
+    }
+
+    /**
+     * 只取审核通知里的故事标题，用于把超限的历史通知也标记作废。
+     * 拿不到返回空串。
+     */
+    private String reviewTitle(String noticeId) {
+        SiemensCheckInTask.Page detail = task.follow(
+                task.supportBaseUrl() + "/MySupport/MyMsgDetail.aspx?noticeId=" + noticeId);
+        if (detail == null || detail.body == null) {
+            return "";
+        }
+        org.jsoup.nodes.Element body = org.jsoup.Jsoup.parse(detail.body).selectFirst(".msg-detail-btm");
+        String text = body == null ? "" : body.text().replaceAll("\\s+", " ");
+        Matcher matcher = STORY_REVIEW.matcher(text);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /**
+     * 把审核结果压成一句通知。
+     * 逐条列标题会拉出很长一段，通知里只需要知道「几篇没过、什么原因、哪篇被降级」。
+     */    static String summarizeReviews(List<String[]> reviews) {
+        if (reviews == null || reviews.isEmpty()) {
+            return "";
+        }
+        int rejected = 0;
+        int converted = 0;
+        String reason = "";
+        List<String> convertedTitles = new ArrayList<>();
+        for (String[] review : reviews) {
+            if (review[1] != null && review[1].startsWith("被转成普通帖")) {
+                converted++;
+                convertedTitles.add(review[0]);
+            } else {
+                rejected++;
+                if (reason.isEmpty() && review[1] != null) {
+                    reason = review[1].replace("未通过审核：", "").trim();
+                }
+            }
+        }
+        List<String> parts = new ArrayList<>();
+        if (rejected > 0) {
+            parts.add(rejected + " 篇未过审" + (reason.isEmpty() ? "" : "（" + reason + "）"));
+        }
+        if (converted > 0) {
+            parts.add(converted + " 篇被转成普通帖");
+        }
+        return String.join("，", parts);
     }
 
     /**

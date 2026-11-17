@@ -465,6 +465,31 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void summarizesStoryReviewsInsteadOfListingEveryTitle() {
+        // 审核结果只报汇总，逐条列标题会把通知拉得很长。
+        List<String[]> reviews = Arrays.asList(
+                new String[]{"深夜排查组网风暴干扰", "未通过审核：非原创内容"},
+                new String[]{"凌晨三点那次DP通讯中断排查", "未通过审核：非原创内容"},
+                new String[]{"第一次独立调试", "被转成普通帖"});
+
+        assertEquals("2 篇未过审（非原创内容），1 篇被转成普通帖",
+                SiemensForumActions.summarizeReviews(reviews));
+
+        // 只有驳回时不该出现转普通帖的措辞。
+        assertEquals("1 篇未过审（非原创内容）",
+                SiemensForumActions.summarizeReviews(Collections.singletonList(
+                        new String[]{"标题", "未通过审核：非原创内容"})));
+
+        // 只有降级时同理。
+        assertEquals("1 篇被转成普通帖",
+                SiemensForumActions.summarizeReviews(Collections.singletonList(
+                        new String[]{"标题", "被转成普通帖"})));
+
+        assertEquals("", SiemensForumActions.summarizeReviews(null));
+        assertEquals("", SiemensForumActions.summarizeReviews(Collections.emptyList()));
+    }
+
+    @Test
     public void parsesSiteDateMillis() {
         // 站点接口的时间是 /Date(毫秒)/，要能转成北京时间的日期。
         assertEquals("2026-11-16", SiemensPipeline.dateOf("/Date(1794791942350)/"));
