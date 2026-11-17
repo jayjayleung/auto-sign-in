@@ -101,7 +101,7 @@ public class SiemensCheckInTaskTest {
         task.run();
 
         assertEquals("西门子签到", task.buildNotificationSection().getTitle());
-        assertEquals("今日签到成功，已连续签到 4 天，当前西币 88", plainText(task));
+        assertEquals("签到成功，连续 4 天，西币 88", plainText(task));
         assertEquals(1, loginPosts.get());
         assertEquals(1, signActions.get());
     }
@@ -112,7 +112,7 @@ public class SiemensCheckInTaskTest {
         SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
         task.run();
 
-        assertEquals("今日已签到，已连续签到 9 天，当前西币 88", plainText(task));
+        assertEquals("已签到，连续 9 天，西币 88", plainText(task));
         assertEquals(0, signActions.get());
     }
 
@@ -514,17 +514,20 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
-    public void buildsNaturalSignSummary() {
-        // 签到行用自然句，把累计天数和余额合并进去，缺少的信息自动省略。
-        assertEquals("今日签到成功，已连续签到 5 天，当前西币 153（今日 +9）",
+    public void buildsCompactSignSummary() {
+        // 通知本身就是当天结果，「今日」「当前」这类词属于冗余，全部省掉。
+        assertEquals("签到成功，连续 5 天，西币 153（+9）",
                 SiemensCheckInTask.signSummary("签到成功", "5", "153", 9));
         // 今天已签过、没有西币变化时不显示括号。
-        assertEquals("今日已签到，已连续签到 5 天，当前西币 153",
+        assertEquals("已签到，连续 5 天，西币 153",
                 SiemensCheckInTask.signSummary("今日已签到", "5", "153", 0));
+        // 站点自带「今日」前缀时要去掉，避免「今日今日」或缺字。
+        assertEquals("已签到，连续 9 天，西币 88",
+                SiemensCheckInTask.signSummary("今日已签到", "9", "88", 0));
         // 读不到余额时只报签到。
-        assertEquals("今日签到成功，已连续签到 3 天",
+        assertEquals("签到成功，连续 3 天",
                 SiemensCheckInTask.signSummary("签到成功", "3", null, null));
-        assertEquals("今日签到成功", SiemensCheckInTask.signSummary("签到成功", null, null, null));
+        assertEquals("签到成功", SiemensCheckInTask.signSummary("签到成功", null, null, null));
     }
 
     @Test
@@ -694,7 +697,7 @@ public class SiemensCheckInTaskTest {
         SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
         task.run();
 
-        assertEquals("今日签到成功，已连续签到 4 天，当前西币 88", plainText(task));
+        assertEquals("签到成功，连续 4 天，西币 88", plainText(task));
         assertEquals(1, signActions.get());
     }
 

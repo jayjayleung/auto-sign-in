@@ -449,23 +449,28 @@ public class SiemensCheckInTask extends CheckInTask {
     }
 
     /**
-     * 签到结果的自然句，例如「今日签到成功，已连续签到 5 天，当前西币 153（今日 +9）」。
-     * 分成「签到情况」和「累计与余额」两段，缺失的信息自动省略，不留空括号。
+     * 签到结果的自然句，例如「签到成功，连续 5 天，西币 153（+9）」。
+     * 通知本身就是当天的结果，「今日」「当前」这类词属于冗余，一律省掉；
+     * 缺失的信息自动省略，不留空括号或多余分隔符。
      */
     static String signSummary(String result, String signCount, String coinValue, Integer gained) {
+        // 站点返回的结果可能自带「今日」前缀，这里统一去掉，避免拼成「今日今日…」。
         String state = StrUtil.blankToDefault(result, "已签到").trim();
-        // 站点给的结果本身可能已带「今日」，避免拼成「今日今日已签到」。
-        StringBuilder text = new StringBuilder(state.startsWith("今日") ? state : "今日" + state);
+        while (state.startsWith("今日")) {
+            state = state.substring(2);
+        }
+        List<String> parts = new ArrayList<>();
+        if (StrUtil.isNotBlank(state)) {
+            parts.add(state);
+        }
         if (StrUtil.isNotBlank(signCount)) {
-            text.append("，已连续签到 ").append(signCount.trim()).append(" 天");
+            parts.add("连续 " + signCount.trim() + " 天");
         }
         if (StrUtil.isNotBlank(coinValue)) {
-            text.append("，当前西币 ").append(coinValue.trim());
-            if (gained != null && gained > 0) {
-                text.append("（今日 +").append(gained).append("）");
-            }
+            parts.add("西币 " + coinValue.trim()
+                    + (gained != null && gained > 0 ? "（+" + gained + "）" : ""));
         }
-        return text.toString();
+        return String.join("，", parts);
     }
 
     // ==================== 每日任务编排 ====================
