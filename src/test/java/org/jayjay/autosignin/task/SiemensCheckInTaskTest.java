@@ -465,28 +465,52 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
-    public void summarizesStoryReviewsInsteadOfListingEveryTitle() {
-        // 审核结果只报汇总，逐条列标题会把通知拉得很长。
-        List<String[]> reviews = Arrays.asList(
-                new String[]{"深夜排查组网风暴干扰", "未通过审核：非原创内容"},
-                new String[]{"凌晨三点那次DP通讯中断排查", "未通过审核：非原创内容"},
-                new String[]{"第一次独立调试", "被转成普通帖"});
+    public void onlyAlertsStoryRejectionAfterSeveralStraightDays() {
+        // 故事帖天天被拒是常态，每天报一次只会变噪音；连续 3 天才提醒关开关。
+        List<String[]> allRejected = Arrays.asList(
+                new String[]{"标题一", "未通过审核：非原创内容"},
+                new String[]{"标题二", "未通过审核：非原创内容"});
+        assertTrue(SiemensForumActions.allRejected(allRejected));
 
-        assertEquals("2 篇未过审（非原创内容），1 篇被转成普通帖",
-                SiemensForumActions.summarizeReviews(reviews));
+        // 有任一篇被降级成普通帖就不算「全被拒」，计数应清零。
+        List<String[]> mixed = Arrays.asList(
+                new String[]{"标题一", "未通过审核：非原创内容"},
+                new String[]{"标题二", "被转成普通帖"});
+        assertFalse(SiemensForumActions.allRejected(mixed));
 
-        // 只有驳回时不该出现转普通帖的措辞。
-        assertEquals("1 篇未过审（非原创内容）",
-                SiemensForumActions.summarizeReviews(Collections.singletonList(
-                        new String[]{"标题", "未通过审核：非原创内容"})));
+        // 没有结果时不计入连续失败，避免把没提交成功的那天也算上。
+        assertFalse(SiemensForumActions.allRejected(Collections.emptyList()));
+        assertFalse(SiemensForumActions.allRejected(null));
 
-        // 只有降级时同理。
-        assertEquals("1 篇被转成普通帖",
-                SiemensForumActions.summarizeReviews(Collections.singletonList(
-                        new String[]{"标题", "被转成普通帖"})));
+        // 只在正好第 3 天提醒，之后不重复刷。
+        assertEquals("", SiemensForumActions.rejectStreakAlert(1));
+        assertEquals("", SiemensForumActions.rejectStreakAlert(2));
+        assertTrue(SiemensForumActions.rejectStreakAlert(3).contains("SIEMENS_STORY_POST=false"));
+        assertEquals("", SiemensForumActions.rejectStreakAlert(4));
+    }
 
-        assertEquals("", SiemensForumActions.summarizeReviews(null));
-        assertEquals("", SiemensForumActions.summarizeReviews(Collections.emptyList()));
+    @Test
+    public void countsConsecutiveRejectDays() throws Exception {
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        Class<?> actions = SiemensForumActions.class;
+        java.lang.reflect.Constructor<?> ctor = actions.getDeclaredConstructor(SiemensCheckInTask.class);
+        ctor.setAccessible(true);
+        Object forum = ctor.newInstance(task);
+        java.lang.reflect.Method record = actions.getDeclaredMethod("recordReviewOutcome", boolean.class);
+        record.setAccessible(true);
+
+        java.nio.file.Path streakFile = task.storyRejectStreakPath();
+        try {
+            java.nio.file.Files.deleteIfExists(streakFile);
+            assertEquals(1, record.invoke(forum, true));
+            assertEquals(2, record.invoke(forum, true));
+            assertEquals(3, record.invoke(forum, true));
+            // 有一天放行就清零，之后重新从 1 开始。
+            assertEquals(0, record.invoke(forum, false));
+            assertEquals(1, record.invoke(forum, true));
+        } finally {
+            java.nio.file.Files.deleteIfExists(streakFile);
+        }
     }
 
     @Test

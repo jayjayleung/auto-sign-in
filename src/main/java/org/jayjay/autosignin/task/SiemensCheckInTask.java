@@ -509,12 +509,17 @@ public class SiemensCheckInTask extends CheckInTask {
         }
         SiemensForumActions forum = new SiemensForumActions(this);
         // 故事帖要等审核，结果在下一次运行时才知道，先看上次提交的过了没有。
+        // 天天报「N 篇未过审」只会变成噪音（程序自己已经标记作废并会跳过），
+        // 只有连续多天全被拒、该考虑关掉故事帖时才提醒一次。
         try {
             List<String[]> reviews = forum.readStoryReviews();
             if (!reviews.isEmpty()) {
                 forum.markRejectedStories(reviews);
-                // 只报汇总，不逐条列标题：积压时逐条列会把通知拉得很长。
-                addMessage("故事审核：", SiemensForumActions.summarizeReviews(reviews));
+                String alert = SiemensForumActions.rejectStreakAlert(
+                        forum.recordReviewOutcome(SiemensForumActions.allRejected(reviews)));
+                if (StrUtil.isNotBlank(alert)) {
+                    addMessage("故事审核：", alert);
+                }
             }
         } catch (Exception e) {
             System.out.println("[西门子] 读取故事审核结果失败：" + e.getMessage());
@@ -1514,6 +1519,15 @@ public class SiemensCheckInTask extends CheckInTask {
             return null;
         }
         return stateDir().resolve("siemens-story-reviews-" + sha1Hex(username.trim()).substring(0, 12) + ".txt");
+    }
+
+    /** 故事帖连续被拒天数的记录文件，按账号区分。 */
+    Path storyRejectStreakPath() {
+        String username = environment == null ? null : environment.get(USERNAME_KEY);
+        if (StrUtil.isBlank(username)) {
+            return null;
+        }
+        return stateDir().resolve("siemens-story-streak-" + sha1Hex(username.trim()).substring(0, 12) + ".txt");
     }
 
     String currentUserId() {

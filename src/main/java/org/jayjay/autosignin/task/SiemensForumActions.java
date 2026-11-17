@@ -4,6 +4,9 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -477,35 +480,64 @@ final class SiemensForumActions {
     }
 
     /**
-     * 把审核结果压成一句通知。
-     * 逐条列标题会拉出很长一段，通知里只需要知道「几篇没过、什么原因、哪篇被降级」。
-     */    static String summarizeReviews(List<String[]> reviews) {
-        if (reviews == null || reviews.isEmpty()) {
-            return "";
-        }
-        int rejected = 0;
-        int converted = 0;
-        String reason = "";
-        List<String> convertedTitles = new ArrayList<>();
-        for (String[] review : reviews) {
-            if (review[1] != null && review[1].startsWith("被转成普通帖")) {
-                converted++;
-                convertedTitles.add(review[0]);
-            } else {
-                rejected++;
-                if (reason.isEmpty() && review[1] != null) {
-                    reason = review[1].replace("未通过审核：", "").trim();
-                }
+     * 记录本次审核结果，返回累计连续被拒的天数。
+     * <p>
+     * 故事帖天天被拒是常态，每天都往通知里写一行「N 篇未过审」只会变成噪音，
+     * 所以平时不报，只有连续多天全被拒、该考虑关掉故事帖时才提醒一次。
+     * 计数按账号存在 state 目录，任一故事被通过或降级为普通帖就清零。
+     */
+    int recordReviewOutcome(boolean allRejected) {
+        Path file = task.storyRejectStreakPath();
+        int streak = 0;
+        if (file != null && Files.exists(file)) {
+            try {
+                String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).trim();
+                streak = StrUtil.isBlank(text) ? 0 : Integer.parseInt(text);
+            } catch (Exception e) {
+                streak = 0;
             }
         }
-        List<String> parts = new ArrayList<>();
-        if (rejected > 0) {
-            parts.add(rejected + " 篇未过审" + (reason.isEmpty() ? "" : "（" + reason + "）"));
+        streak = allRejected ? streak + 1 : 0;
+        if (file != null) {
+            try {
+                Files.createDirectories(file.getParent());
+                Files.write(file, String.valueOf(streak).getBytes(StandardCharsets.UTF_8));
+            } catch (Exception e) {
+                // 写不进去只会导致下次提醒晚一天。
+            }
         }
-        if (converted > 0) {
-            parts.add(converted + " 篇被转成普通帖");
+        return streak;
+    }
+
+    /** 连续被拒到第几次时提醒关掉故事帖。 */
+    static final int REJECT_STREAK_ALERT = 3;
+
+    /**
+     * 连续被拒达到阈值时的提醒文案；没到阈值返回空串。
+     * 只在正好达到阈值那天提醒一次，之后不再重复，避免天天刷同一条。
+     */
+    static String rejectStreakAlert(int streak) {
+        if (streak != REJECT_STREAK_ALERT) {
+            return "";
         }
-        return String.join("，", parts);
+        return "连续 " + streak + " 天故事帖全被拒，"
+                + "可考虑设 SIEMENS_STORY_POST=false 关掉这个故事帖任务";
+    }
+
+    /**
+     * 本次审核里是否全部被驳回（没有任何一篇被放行或降级后仍算数）。
+     * 没有结果时按「不算被拒」处理，避免把没提交成功的一天也计入连续失败。
+     */
+    static boolean allRejected(List<String[]> reviews) {
+        if (reviews == null || reviews.isEmpty()) {
+            return false;
+        }
+        for (String[] review : reviews) {
+            if (review[1] == null || !review[1].startsWith("未通过审核")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -518,7 +550,8 @@ final class SiemensForumActions {
         }
     }
 
-    private String authorOf(String articleId, String boardId) {        SiemensCheckInTask.Page page = task.follow(
+    private String authorOf(String articleId, String boardId) {
+        SiemensCheckInTask.Page page = task.follow(
                 task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
         if (page == null) {
             return "";
