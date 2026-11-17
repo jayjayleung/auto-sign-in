@@ -263,6 +263,10 @@ final class SiemensPipeline {
             if (round == null || Boolean.TRUE.equals(round.getBool("adopted"))) {
                 continue;
             }
+            // 已经确认过无法采纳的轮次直接跳过，别每天白打一次请求。
+            if (Boolean.TRUE.equals(round.getBool("adoptClosed"))) {
+                continue;
+            }
             if (!myUid.equals(round.getStr("askerUid"))) {
                 continue;
             }
@@ -273,13 +277,41 @@ final class SiemensPipeline {
             if (StrUtil.isBlank(aid) || StrUtil.isBlank(answerer) || !siblings.contains(answerer)) {
                 continue;
             }
-            if (adopt(round.getStr("qid"), round.getStr("cid"), aid, answerer)) {
+            String qid = round.getStr("qid");
+            String cid = round.getStr("cid");
+            // 站点允许提问者 7 天内采纳，超期或用「无满意答案」关闭后就再也采纳不了。
+            if (isQuestionClosed(qid)) {
+                round.set("adoptClosed", true);
+                round.set("adoptClosedAt", LocalDate.now(SHANGHAI).toString());
+                save();
+                System.out.println("[西门子] 问题已关闭，跳过采纳：" + qid);
+                continue;
+            }
+            if (adopt(qid, cid, aid, answerer)) {
                 round.set("adopted", true);
                 round.set("adoptedAt", LocalDate.now(SHANGHAI).toString());
                 save();
-                System.out.println("[西门子] 已采纳兄弟账号的回答：" + round.getStr("qid") + "/" + aid);
+                System.out.println("[西门子] 已采纳兄弟账号的回答：" + qid + "/" + aid);
             }
         }
+    }
+
+    /**
+     * 问题是否已经无法再采纳。
+     * 站点问答接口的 Q_Status：0 待解决、1 已关闭（无满意答案）、3 已解决；
+     * 只有 0 才可能采纳，读不到状态时按「还能试」处理，避免误判后彻底放弃。
+     */
+    private boolean isQuestionClosed(String qid) {
+        JSONArray answers = answers(qid);
+        if (answers.isEmpty()) {
+            return false;
+        }
+        JSONObject first = answers.getJSONObject(0);
+        if (first == null) {
+            return false;
+        }
+        int status = parseInt(first.getStr("Q_Status"));
+        return status == 1 || status == 3;
     }
 
     /**
@@ -503,6 +535,13 @@ final class SiemensPipeline {
                 if (mine.getInt("IsBestAnswer", 0) == 1) {
                     round.set("adopted", true);
                     round.set("adoptedAt", dateOf(mine.getStr("A_UpdateTime")));
+                }
+            }
+            // 已经关闭的问题（Q_Status 为 1 或 3）不可能再采纳，先标好，省得每轮重试。
+            if (mine != null && !Boolean.TRUE.equals(round.getBool("adopted"))) {
+                int status = parseInt(mine.getStr("Q_Status"));
+                if (status == 1 || status == 3) {
+                    round.set("adoptClosed", true);
                 }
             }
             rounds.put(round);

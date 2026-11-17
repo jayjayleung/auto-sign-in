@@ -445,6 +445,26 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void skipsClosedQuestionsWhenAdopting() {
+        // 站点 Q_Status：0 待解决、1 已关闭、3 已解决；只有 0 才可能采纳。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        try {
+            java.lang.reflect.Method method =
+                    SiemensPipeline.class.getDeclaredMethod("isQuestionClosed", String.class);
+            method.setAccessible(true);
+            java.lang.reflect.Constructor<SiemensPipeline> ctor =
+                    SiemensPipeline.class.getDeclaredConstructor(SiemensCheckInTask.class);
+            ctor.setAccessible(true);
+            SiemensPipeline pipeline = ctor.newInstance(task);
+            // 本地假站点没有问答接口，读不到状态时必须返回 false（继续尝试），
+            // 否则一次接口抖动就会把还能采纳的问题永久标记成不可采纳。
+            assertEquals(false, method.invoke(pipeline, "999999"));
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    @Test
     public void parsesSiteDateMillis() {
         // 站点接口的时间是 /Date(毫秒)/，要能转成北京时间的日期。
         assertEquals("2026-11-16", SiemensPipeline.dateOf("/Date(1794791942350)/"));
