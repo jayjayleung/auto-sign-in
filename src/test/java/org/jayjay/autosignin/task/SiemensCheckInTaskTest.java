@@ -101,7 +101,7 @@ public class SiemensCheckInTaskTest {
         task.run();
 
         assertEquals("西门子签到", task.buildNotificationSection().getTitle());
-        assertEquals("签到结果：签到成功\n已签到：4 天\n西币：88（本次 +0）", plainText(task));
+        assertEquals("今日签到成功，已连续签到 4 天，当前西币 88", plainText(task));
         assertEquals(1, loginPosts.get());
         assertEquals(1, signActions.get());
     }
@@ -112,7 +112,7 @@ public class SiemensCheckInTaskTest {
         SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
         task.run();
 
-        assertEquals("签到结果：今日已签到\n已签到：9 天\n西币：88（本次 +0）", plainText(task));
+        assertEquals("今日已签到，已连续签到 9 天，当前西币 88", plainText(task));
         assertEquals(0, signActions.get());
     }
 
@@ -440,7 +440,7 @@ public class SiemensCheckInTaskTest {
     public void skippingStoryDoesNotReportQuotaLimit() {
         // 按配置关闭的故事帖不能当成「额度受限」，否则通知会误报明天重试。
         List<String> pending = Collections.singletonList("NewMySupport_BBSPostStoryArticle");
-        assertEquals("已全部完成（故事帖已按配置关闭）",
+        assertEquals("全部完成（故事帖已关闭）",
                 SiemensCheckInTask.remainingText(pending, false, null, true));
     }
 
@@ -514,6 +514,20 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void buildsNaturalSignSummary() {
+        // 签到行用自然句，把累计天数和余额合并进去，缺少的信息自动省略。
+        assertEquals("今日签到成功，已连续签到 5 天，当前西币 153（今日 +9）",
+                SiemensCheckInTask.signSummary("签到成功", "5", "153", 9));
+        // 今天已签过、没有西币变化时不显示括号。
+        assertEquals("今日已签到，已连续签到 5 天，当前西币 153",
+                SiemensCheckInTask.signSummary("今日已签到", "5", "153", 0));
+        // 读不到余额时只报签到。
+        assertEquals("今日签到成功，已连续签到 3 天",
+                SiemensCheckInTask.signSummary("签到成功", "3", null, null));
+        assertEquals("今日签到成功", SiemensCheckInTask.signSummary("签到成功", null, null, null));
+    }
+
+    @Test
     public void parsesSiteDateMillis() {
         // 站点接口的时间是 /Date(毫秒)/，要能转成北京时间的日期。
         assertEquals("2026-11-16", SiemensPipeline.dateOf("/Date(1794791942350)/"));
@@ -559,10 +573,10 @@ public class SiemensCheckInTaskTest {
         List<String> pending = Collections.singletonList("NewMySupport_BBSPostStoryArticle");
 
         // 故事帖失败：必须仍然列为未完成，不能报「已全部完成」。
-        assertEquals("未完成 [论坛发故事帖]",
+        assertEquals("还有 1 项未完成：论坛发故事帖",
                 SiemensCheckInTask.remainingText(pending, false, null));
         // 故事帖提交成功：站点审核期间状态还是未完成，但不该再列出来。
-        assertEquals("已全部完成，故事帖待审核",
+        assertEquals("全部完成，故事帖已提交待审核",
                 SiemensCheckInTask.remainingText(pending, true, null));
     }
 
@@ -571,7 +585,7 @@ public class SiemensCheckInTaskTest {
         List<String> pending = Arrays.asList("NewMySupport_FAQuestion",
                 "NewMySupport_CollectionQA", "NewMySupport_BBSPostStoryArticle");
 
-        assertEquals("连续失败 2 次，已中止，未完成 [找答案提问, 收藏问答, 论坛发故事帖]",
+        assertEquals("连续失败 2 次，已中止，未完成 找答案提问、收藏问答、论坛发故事帖",
                 SiemensCheckInTask.remainingText(pending, false, "连续失败 2 次，已中止"));
     }
 
@@ -581,14 +595,14 @@ public class SiemensCheckInTaskTest {
                 "NewMySupport_BBSPostStoryArticle");
 
         // 关掉故事帖开关后，剩余项里不该再出现它，也不该说「未完成」。
-        assertEquals("未完成 [找答案提问]",
+        assertEquals("还有 1 项未完成：找答案提问",
                 SiemensCheckInTask.remainingText(pending, false, null, true));
         // 只剩故事帖时直接报完成，并注明是按配置关闭。
-        assertEquals("已全部完成（故事帖已按配置关闭）",
+        assertEquals("全部完成（故事帖已关闭）",
                 SiemensCheckInTask.remainingText(Collections.singletonList("NewMySupport_BBSPostStoryArticle"),
                         false, null, true));
         // 开关打开时行为不变。
-        assertEquals("未完成 [论坛发故事帖]",
+        assertEquals("还有 1 项未完成：论坛发故事帖",
                 SiemensCheckInTask.remainingText(Collections.singletonList("NewMySupport_BBSPostStoryArticle"),
                         false, null, false));
     }
@@ -680,7 +694,7 @@ public class SiemensCheckInTaskTest {
         SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
         task.run();
 
-        assertEquals("签到结果：签到成功\n已签到：4 天\n西币：88（本次 +0）", plainText(task));
+        assertEquals("今日签到成功，已连续签到 4 天，当前西币 88", plainText(task));
         assertEquals(1, signActions.get());
     }
 
@@ -695,8 +709,8 @@ public class SiemensCheckInTaskTest {
             task.run();
             String text = plainText(task);
             // 故事帖被站点拒绝时不能报「已全部完成」，必须照实列出未完成。
-            assertTrue("应报未完成，实际：" + text, text.contains("未完成 [论坛发故事帖]"));
-            assertFalse("不能报已全部完成，实际：" + text, text.contains("已全部完成"));
+            assertTrue("应报未完成，实际：" + text, text.contains("还有 1 项未完成：论坛发故事帖"));
+            assertFalse("不能报已全部完成，实际：" + text, text.contains("全部完成"));
         } finally {
             clearRunMarker();
         }
@@ -712,7 +726,7 @@ public class SiemensCheckInTaskTest {
             task.run();
             String text = plainText(task);
             // 拿不到任务列表时既不能报「已全部完成」，也不能写当天标记。
-            assertFalse("不能报已全部完成，实际：" + text, text.contains("已全部完成"));
+            assertFalse("不能报已全部完成，实际：" + text, text.contains("全部完成"));
             assertTrue("应说明读取失败，实际：" + text, text.contains("读取任务列表失败"));
         } finally {
             clearRunMarker();

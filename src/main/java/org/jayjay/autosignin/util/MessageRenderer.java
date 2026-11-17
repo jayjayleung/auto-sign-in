@@ -124,13 +124,48 @@ public final class MessageRenderer {
             if (character == '\n') {
                 escaped.append("  ").append(LINE_END);
             } else {
-                if (MARKDOWN_SPECIAL_CHARACTERS.indexOf(character) >= 0) {
+                if (shouldEscapeMarkdown(normalized, index)) {
                     escaped.append('\\');
                 }
                 escaped.append(character);
             }
         }
         return escaped.toString();
+    }
+
+    /**
+     * 判断某个字符是否需要转义。
+     * Markdown 的特殊字符只在特定位置才有语义，无条件加反斜杠会在推送里露出反斜杠，
+     * 例如「西币 153（今日 +9）」的加号并不构成列表，不需要转义。
+     */
+    private static boolean shouldEscapeMarkdown(String text, int index) {
+        char character = text.charAt(index);
+        if (MARKDOWN_SPECIAL_CHARACTERS.indexOf(character) < 0) {
+            return false;
+        }
+        // 加号、减号、井号、大于号只在行首才是列表或标题标记，正文里的不转义。
+        if (character == '+' || character == '-' || character == '#' || character == '>') {
+            return isLineStart(text, index);
+        }
+        // 点和感叹号只在行首紧跟数字/文本时才可能是有序列表或图片，正文里保留原样。
+        if (character == '.' || character == '!') {
+            return isLineStart(text, index);
+        }
+        return true;
+    }
+
+    /** 从 index 往前看，只有空白也算行首。 */
+    private static boolean isLineStart(String text, int index) {
+        for (int i = index - 1; i >= 0; i--) {
+            char previous = text.charAt(i);
+            if (previous == '\n') {
+                return true;
+            }
+            if (!Character.isWhitespace(previous)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String escapeHtml(String text) {

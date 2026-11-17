@@ -27,7 +27,7 @@ public class NotificationSenderTest {
         assertEquals("签到结果", body.getStr("title"));
         assertEquals("markdown", body.getStr("template"));
         assertEquals(
-                "## 云桥签到\n\n**账号**（one@example\\.com）  \n签到结果：今日已签到\n\n",
+                "## 云桥签到\n\n**账号**（one@example.com）  \n签到结果：今日已签到\n\n",
                 body.getStr("content")
         );
     }

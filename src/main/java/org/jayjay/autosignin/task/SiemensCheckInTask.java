@@ -368,7 +368,7 @@ public class SiemensCheckInTask extends CheckInTask {
             }
             String failure = execute(username.trim(), password);
             if (failure != null) {
-                addMessage("签到失败：", failure);
+                addMessage("签到失败：" + failure);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -431,10 +431,6 @@ public class SiemensCheckInTask extends CheckInTask {
         if (StrUtil.isNotBlank(profile.userId)) {
             currentUserId = profile.userId;
         }
-        addMessage("签到结果：", result);
-        if (detail.get("SignCount") != null) {
-            addMessage("已签到：", detail.getStr("SignCount"), " 天");
-        }
         playLottery(readSignDetail());
 
         if (dailyTasksEnabled()) {
@@ -442,17 +438,34 @@ public class SiemensCheckInTask extends CheckInTask {
         }
 
         // 任务都做完后再读一次余额，用差额体现今天实际增加了多少西币。
+        // 签到和西币合成一句放在最后输出，因为余额要等任务跑完才准确。
         Profile after = loadProfile();
         String coinValue = StrUtil.blankToDefault(after.coin, profile.coin);
+        Integer coinAfter = parseIntOrNull(coinValue);
+        Integer gained = coinBefore != null && coinAfter != null && coinAfter >= coinBefore
+                ? coinAfter - coinBefore : null;
+        addMessageFirst(signSummary(result, detail.getStr("SignCount"), coinValue, gained));
+        return null;
+    }
+
+    /**
+     * 签到结果的自然句，例如「今日签到成功，已连续签到 5 天，当前西币 153（今日 +9）」。
+     * 分成「签到情况」和「累计与余额」两段，缺失的信息自动省略，不留空括号。
+     */
+    static String signSummary(String result, String signCount, String coinValue, Integer gained) {
+        String state = StrUtil.blankToDefault(result, "已签到").trim();
+        // 站点给的结果本身可能已带「今日」，避免拼成「今日今日已签到」。
+        StringBuilder text = new StringBuilder(state.startsWith("今日") ? state : "今日" + state);
+        if (StrUtil.isNotBlank(signCount)) {
+            text.append("，已连续签到 ").append(signCount.trim()).append(" 天");
+        }
         if (StrUtil.isNotBlank(coinValue)) {
-            Integer coinAfter = parseIntOrNull(coinValue);
-            if (coinBefore != null && coinAfter != null && coinAfter >= coinBefore) {
-                addMessage("西币：", coinValue, "（本次 +" + (coinAfter - coinBefore) + "）");
-            } else {
-                addMessage("西币：", coinValue);
+            text.append("，当前西币 ").append(coinValue.trim());
+            if (gained != null && gained > 0) {
+                text.append("（今日 +").append(gained).append("）");
             }
         }
-        return null;
+        return text.toString();
     }
 
     // ==================== 每日任务编排 ====================
@@ -482,14 +495,14 @@ public class SiemensCheckInTask extends CheckInTask {
     private void completeDailyTasks() {
         if (alreadyRanToday()) {
             System.out.println("[西门子] 今天已经执行过每日任务，跳过，避免重复发帖");
-            addMessage("每日任务：", "今天已执行过，跳过");
+            addMessage("今天已执行过每日任务，跳过以免重复发帖");
             return;
         }
         JSONObject tasks = readTasks();
         if (tasks == null) {
             // 拿不到任务列表时不能当成「全部完成」，也不能写当天标记，留给下次重试。
             System.out.println("[西门子] 拿不到每日任务列表，跳过本次每日任务");
-            addMessage("每日任务：", "读取任务列表失败，稍后会重试");
+            addMessage("读取任务列表失败，稍后会重试");
             return;
         }
         List<String> pending = pendingDailyTasks(tasks);
@@ -518,7 +531,7 @@ public class SiemensCheckInTask extends CheckInTask {
                 String alert = SiemensForumActions.rejectStreakAlert(
                         forum.recordReviewOutcome(SiemensForumActions.allRejected(reviews)));
                 if (StrUtil.isNotBlank(alert)) {
-                    addMessage("故事审核：", alert);
+                    addMessage(alert);
                 }
             }
         } catch (Exception e) {
@@ -617,9 +630,9 @@ public class SiemensCheckInTask extends CheckInTask {
         JSONObject tasks = readTasks();
         if (tasks == null) {
             // 读不到就只报告本次执行结果，不能编造成「已全部完成」。
-            String text = aborted != null ? aborted : "已执行完毕，任务状态读取失败";
+            String text = aborted != null ? aborted : "任务跑完了，但读取任务列表失败";
             if (!handled.isEmpty()) {
-                text = text + "（本次已处理 " + handled.size() + " 项）";
+                text = text + "（本次处理了 " + handled.size() + " 项）";
             }
             if (!quotaLimited.isEmpty()) {
                 text = text + "（受站点每日主贴上限限制，明天会重试）";
@@ -636,11 +649,6 @@ public class SiemensCheckInTask extends CheckInTask {
     }
 
     /**
-     * 把剩余任务拼成通知文案。
-     * 只有本次确实提交成功的故事帖才算已处理，失败时仍要出现在未完成列表里；
-     * 主动关掉故事帖开关时不算未完成，单独说明一句。
-     */
-    /**
      * 三个参数的重载：故事帖开关默认视为打开，等价于 {@code storySkipped=false}。
      * 保留它是为了单元测试读起来更直白，正式流程一律走四参版本。
      */
@@ -648,6 +656,11 @@ public class SiemensCheckInTask extends CheckInTask {
         return remainingText(pending, submittedStory, aborted, false);
     }
 
+    /**
+     * 把剩余任务拼成通知文案。
+     * 只有本次确实提交成功的故事帖才算已处理，失败时仍要出现在未完成列表里；
+     * 主动关掉故事帖开关时不算未完成，单独说明一句。
+     */
     static String remainingText(List<String> pending, boolean submittedStory, String aborted,
                                 boolean storySkipped) {
         List<String> left = new ArrayList<>(pending == null ? new ArrayList<>() : pending);
@@ -659,9 +672,9 @@ public class SiemensCheckInTask extends CheckInTask {
             names.add(taskDisplayName(code));
         }
         if (names.isEmpty() && aborted == null) {
-            String text = submittedStory ? "已全部完成，故事帖待审核" : "已全部完成";
+            String text = submittedStory ? "全部完成，故事帖已提交待审核" : "全部完成";
             if (storySkipped) {
-                text = text + "（故事帖已按配置关闭）";
+                text = text + "（故事帖已关闭）";
             }
             return text;
         }
@@ -670,13 +683,13 @@ public class SiemensCheckInTask extends CheckInTask {
             // 中止时也要把剩余项列清楚，否则看不出到底卡在哪。
             text.append(aborted);
             if (!names.isEmpty()) {
-                text.append("，未完成 ").append(names);
+                text.append("，未完成 ").append(String.join("、", names));
             }
         } else {
-            text.append("未完成 ").append(names);
+            text.append("还有 ").append(names.size()).append(" 项未完成：").append(String.join("、", names));
         }
         if (submittedStory) {
-            text.append("（故事帖已提交，待审核）");
+            text.append("（故事帖已提交待审核）");
         }
         return text.toString();
     }

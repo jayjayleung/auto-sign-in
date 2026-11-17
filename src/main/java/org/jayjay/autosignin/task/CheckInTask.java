@@ -81,6 +81,18 @@ public abstract class CheckInTask {
     }
 
     /**
+     * 把消息块插到最前面。
+     * 有的结果（比如签到汇总行）要等任务跑完才知道完整数据，但阅读顺序应该在最前面，
+     * 这种情况下用这个方法补插，避免为了凑顺序把中间结果缓存起来。
+     */
+    protected void addMessageFirst(String... message) {
+        MessageBlock block = new MessageBlock().addLine(message);
+        if (!block.isBlank()) {
+            messageBlocks.add(0, block);
+        }
+    }
+
+    /**
      * 将一条已包含样式语义的消息行包装为独立消息块后添加。
      */
     protected void addMessage(MessageLine message) {

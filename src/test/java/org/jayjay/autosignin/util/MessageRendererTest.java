@@ -40,11 +40,11 @@ public class MessageRendererTest {
         );
         assertEquals(
                 "## 云桥签到\n\n"
-                        + "**账号 1**（one@example\\.com）  \n"
+                        + "**账号 1**（one@example.com）  \n"
                         + "当前积分：6  \n"
                         + "连续签到：2 天  \n"
                         + "签到结果：今日已签到\n\n"
-                        + "**账号 2**（two@example\\.com）  \n"
+                        + "**账号 2**（two@example.com）  \n"
                         + "当前积分：7  \n"
                         + "连续签到：2 天  \n"
                         + "签到结果：今日已签到\n\n",
@@ -67,9 +67,25 @@ public class MessageRendererTest {
                 MessageRenderer.toHtml(sections)
         );
         assertEquals(
-                "## 标题 \\<\\&\\>\n\n**粗\\*体** \\<tag\\> \\& \\_value\\_\n\n",
+                "## 标题 \\<\\&>\n\n**粗\\*体** \\<tag> \\& \\_value\\_\n\n",
                 MessageRenderer.toMarkdown(sections)
         );
+    }
+
+    @Test
+    public void doesNotEscapeMarkdownMarkersInsideSentences() {
+        // 正文里的加号、减号不构成列表，转义后推送会露出反斜杠，例如「今日 +9」。
+        NotificationSection section = new NotificationSection("西门子签到",
+                Collections.singletonList(MessageBlock.text("今日签到成功，当前西币 153（今日 +9）")));
+        List<NotificationSection> sections = Collections.singletonList(section);
+
+        assertTrue(MessageRenderer.toMarkdown(sections).contains("（今日 +9）"));
+        assertFalse(MessageRenderer.toMarkdown(sections).contains("\\+"));
+
+        // 行首的减号和加号确实是列表标记，仍然要转义。
+        NotificationSection listLike = new NotificationSection("列表",
+                Collections.singletonList(MessageBlock.text("- 第一项")));
+        assertTrue(MessageRenderer.toMarkdown(Collections.singletonList(listLike)).contains("\\- 第一项"));
     }
 
     @Test
