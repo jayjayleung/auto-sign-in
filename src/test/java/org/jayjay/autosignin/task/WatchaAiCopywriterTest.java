@@ -33,6 +33,63 @@ public class WatchaAiCopywriterTest {
     }
 
     @Test
+    public void repairsTruncatedJsonMissingClosingBrace() {
+        JSONObject json = WatchaAiCopywriter.extractJson(
+                "{\"title\":\"卡住的那道题\",\"paragraphs\":[\"这种不让我逃避的设计，真有点磨人。\"]");
+
+        assertEquals("卡住的那道题", json.getStr("title"));
+        assertTrue(json.getJSONArray("paragraphs").getStr(0).endsWith("磨人。"));
+    }
+
+    @Test
+    public void repairsEnglishQuotesInsideParagraphs() {
+        JSONObject json = WatchaAiCopywriter.extractJson(
+                "{\"title\":\"读完以为懂了\",\"paragraphs\":[\"最舒服的就是\"我觉得我懂了\"，但它不让。\"]}");
+
+        assertTrue(json.getJSONArray("paragraphs").getStr(0).contains("“我觉得我懂了”"));
+    }
+
+    @Test
+    public void repairsRawLineBreaksInsideParagraphs() {
+        JSONObject json = WatchaAiCopywriter.extractJson(
+                "{\"title\":\"标题\",\"paragraphs\":[\"第一段\r\n第二段\"]}");
+
+        assertEquals("第一段\n第二段", json.getJSONArray("paragraphs").getStr(0));
+    }
+
+    @Test
+    public void repairsTruncatedJsonWithEnglishQuotes() {
+        JSONObject json = WatchaAiCopywriter.extractJson(
+                "{\"title\":\"卡住的那道题\",\"paragraphs\":[\"最舒服的就是\"我觉得我懂了\"，但它不让。\"");
+
+        assertEquals("卡住的那道题", json.getStr("title"));
+        assertTrue(json.getJSONArray("paragraphs").getStr(0).contains("“我觉得我懂了”"));
+    }
+
+    @Test
+    public void keepsLegalJsonUnchanged() {
+        String source = "{\"title\":\"标题\",\"paragraphs\":[\"正文里有“中文引号”和\\\\反斜杠\"]}";
+        JSONObject original = JSONUtil.parseObj(source);
+
+        assertEquals(original.getJSONArray("paragraphs").getStr(0),
+                WatchaAiCopywriter.extractJson(source).getJSONArray("paragraphs").getStr(0));
+    }
+
+    @Test
+    public void returnsNullWhenContentHasNoJson() {
+        assertNull(WatchaAiCopywriter.extractJson("服务暂时不可用"));
+        assertNull(WatchaAiCopywriter.extractJson(""));
+        assertNull(WatchaAiCopywriter.extractJson(null));
+    }
+
+    @Test
+    public void ignoresTrailingNoiseAfterJson() {
+        JSONObject json = WatchaAiCopywriter.extractJson("{\"title\":\"只有标题\"}extra:");
+
+        assertEquals("只有标题", json.getStr("title"));
+    }
+
+    @Test
     public void readsPlainProductDescription() {
         JSONObject doc = JSONUtil.parseObj("{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"提供深度检索\"}]}]}");
 

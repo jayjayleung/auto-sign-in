@@ -62,6 +62,26 @@ public class AiClient {
     }
 
     public String complete(String system, String user, boolean fallback) {
+        return complete(system, user, fallback, false);
+    }
+
+    /**
+     * jsonMode 为 true 时带上 response_format=json_object，要求服务保证返回合法 JSON。
+     * 兼容服务不认这个参数会返回 4xx，此时自动去掉参数重试一次，不退化成整体失败。
+     */
+    public String complete(String system, String user, boolean fallback, boolean jsonMode) {
+        try {
+            return chat(system, user, fallback, jsonMode);
+        } catch (IllegalStateException e) {
+            if (jsonMode && rejectsJsonMode(e.getMessage())) {
+                System.out.println("[AI] 服务不支持 response_format，回退到普通请求");
+                return chat(system, user, fallback, false);
+            }
+            throw e;
+        }
+    }
+
+    private String chat(String system, String user, boolean fallback, boolean jsonMode) {
         JSONArray messages = new JSONArray();
         messages.add(JSONUtil.createObj().set("role", "system").set("content", system));
         messages.add(JSONUtil.createObj().set("role", "user").set("content", user));
@@ -70,6 +90,9 @@ public class AiClient {
                 .set("temperature", 0.8)
                 .set("max_tokens", 3000)
                 .set("messages", messages);
+        if (jsonMode) {
+            payload.set("response_format", JSONUtil.createObj().set("type", "json_object"));
+        }
         JSONObject json = request(chatEndpoint(baseUrl), payload, CHAT_TIMEOUT);
         JSONArray choices = json.getJSONArray("choices");
         if (choices == null || choices.isEmpty()) {
@@ -84,6 +107,16 @@ public class AiClient {
                     : "文案生成失败：服务没有返回文案");
         }
         return message.getStr("content");
+    }
+
+    /** 判断错误是否由 response_format 参数造成，只有这类错误才值得去掉参数重试。 */
+    static boolean rejectsJsonMode(String message) {
+        if (StrUtil.isBlank(message)) {
+            return false;
+        }
+        String text = message.toLowerCase();
+        return text.contains("response_format") || text.contains("json_object")
+                || text.contains("json mode");
     }
 
     /**

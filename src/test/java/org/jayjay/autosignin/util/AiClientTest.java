@@ -32,14 +32,20 @@ public class AiClientTest {
     private Map<String, String> environment;
     private volatile String responseBody;
     private volatile String searchBody;
+    private volatile String chatBody;
+    private volatile boolean chatRejectsJsonMode;
     private final AtomicInteger searchRequests = new AtomicInteger();
+    private final AtomicInteger chatRequests = new AtomicInteger();
     private final AtomicReference<String> searchAuthorization = new AtomicReference<>();
     private final AtomicReference<JSONObject> requestBody = new AtomicReference<>();
+    private final AtomicReference<JSONObject> chatRequestBody = new AtomicReference<>();
     private final AtomicReference<String> authorization = new AtomicReference<>();
 
     @Before
     public void setUp() throws IOException {
         responseBody = searchResponse(true, true, false).toString();
+        chatBody = chatResponse("{\"title\":\"标题\"}").toString();
+        chatRejectsJsonMode = false;
         searchBody = "<ol><li class='b_algo'><h2><a href='https://example.com/help'>切问帮助</a></h2>"
                 + "<div class='b_caption'><p>切问支持深度检索和资料整理。</p></div></li></ol>";
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -58,6 +64,27 @@ public class AiClientTest {
             searchAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] body = searchBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.createContext("/v1/chat/completions", exchange -> {
+            JSONObject payload = JSONUtil.parseObj(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            chatRequests.incrementAndGet();
+            chatRequestBody.set(payload);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+            if (chatRejectsJsonMode && payload.containsKey("response_format")) {
+                byte[] rejected = JSONUtil.createObj()
+                        .set("error", JSONUtil.createObj().set("message", "response_format is not supported"))
+                        .toString().getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(400, rejected.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(rejected);
+                }
+                return;
+            }
+            byte[] body = chatBody.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(body);
@@ -217,6 +244,33 @@ public class AiClientTest {
         assertEquals("lite-model", client.modelName(true));
     }
 
+    @Test
+    public void requestsJsonModeWhenAsked() {
+        client().complete("system", "user", false, true);
+
+        assertEquals("json_object", chatRequestBody.get().getJSONObject("response_format").getStr("type"));
+        assertEquals(1, chatRequests.get());
+    }
+
+    @Test
+    public void retriesWithoutJsonModeWhenServiceRejectsTheParameter() {
+        chatRejectsJsonMode = true;
+
+        String content = client().complete("system", "user", false, true);
+
+        assertEquals(2, chatRequests.get());
+        assertFalse(chatRequestBody.get().containsKey("response_format"));
+        assertTrue(content.contains("标题"));
+    }
+
+    @Test
+    public void recognizesJsonModeRejectionMessages() {
+        assertTrue(AiClient.rejectsJsonMode("response_format is not supported"));
+        assertTrue(AiClient.rejectsJsonMode("unsupported parameter: json_object"));
+        assertFalse(AiClient.rejectsJsonMode("busy"));
+        assertFalse(AiClient.rejectsJsonMode(null));
+    }
+
     private static Set<String> queries(String... values) {
         return new LinkedHashSet<String>(Arrays.asList(values));
     }
@@ -230,6 +284,12 @@ public class AiClientTest {
         return JSONUtil.createObj().set("status", "completed").set("output", JSONUtil.createArray()
                 .put(JSONUtil.createObj().set("type", "function_call").set("status", "completed")
                         .set("name", name).set("arguments", arguments)));
+    }
+
+    /** chat/completions 的成功响应，content 就是模型返回的那段文本。 */
+    private static JSONObject chatResponse(String content) {
+        return JSONUtil.createObj().set("choices", JSONUtil.createArray().put(JSONUtil.createObj()
+                .set("message", JSONUtil.createObj().set("content", content))));
     }
 
     private static JSONObject searchResponse(boolean withSearch, boolean withSources, boolean withCitation) {

@@ -502,6 +502,25 @@ public class WatchaCheckInTaskTest {
     }
 
     @Test
+    public void switchesToFallbackModelWhenCopyIsNotJson() {
+        aiMode = "unparsablePost";
+        Map<String, String> environment = accountWithAi();
+        environment.put("AI_FALLBACK_MODEL", "lite-model");
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        // 主模型返回的正文不是 JSON，第二次改用备用模型重写，帖子最终发布成功
+        long postRequests = aiBodies.stream().filter(body -> body.contains("体裁：帖子")).count();
+        assertEquals(2, postRequests);
+        String first = aiBodies.stream().filter(body -> body.contains("体裁：帖子")).findFirst().orElse("");
+        String second = aiBodies.stream().filter(body -> body.contains("体裁：帖子")).reduce((a, b) -> b).orElse("");
+        assertTrue(first.contains("\"model\":\"test-model\""));
+        assertTrue(second.contains("\"model\":\"lite-model\""));
+        assertEquals(1, discussRequests.get());
+    }
+
+    @Test
     public void skipsPostWhenCopyServiceIsDown() {
         aiMode = "error";
 
@@ -831,7 +850,12 @@ public class WatchaCheckInTaskTest {
             paragraphs.add(request.contains("面向科研人员") ? POST_FOR_PRODUCT_7 : POST_BODY);
             content.set("paragraphs", paragraphs);
         }
-        JSONObject message = JSONUtil.createObj().set("content", content.toString());
+        String text = content.toString();
+        if ("unparsablePost".equals(aiMode) && !reviewRequest && request.contains("\"model\":\"test-model\"")) {
+            // 主模型只回了一段说明，完全不是 JSON，模拟线上偶发的「返回内容无法读取」
+            text = "抱歉，这次我直接说说自己的感受吧，没用过就先不评价了。";
+        }
+        JSONObject message = JSONUtil.createObj().set("content", text);
         JSONArray choices = JSONUtil.createArray().put(JSONUtil.createObj().set("message", message));
         json(exchange, 200, JSONUtil.createObj().set("choices", choices).toString());
     }
