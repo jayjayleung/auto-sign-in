@@ -261,36 +261,54 @@ final class SiemensAnswerActions {
         if (done) {
             return;
         }
-        String solved = firstSolvedQuestionWithBestAnswer();
-        if (StrUtil.isBlank(solved)) {
-            System.out.println("[西门子] 没有找到带最佳答案的问题");
+        // 互评日之外（休息日）或轮次里没有可评目标时，退回站上已解决的问题。
+        // 候选要一条条试：列表头部几天不变，撞上自己评过的就得往后顺延，不能直接放弃。
+        List<String> candidates = solvedQuestionsWithBestAnswer();
+        if (candidates.isEmpty()) {
+            System.out.println("[西门子] 没有找到可评论的最佳答案");
             return;
         }
-        String[] parts = solved.split("-", 4);
-        String questionId = parts[0];
-        String categoryId = parts[1];
-        String answerId = parts[2];
-        String answerText = parts.length > 3 ? parts[3] : null;
-        String comment;
-        if (StrUtil.isBlank(answerText)) {
-            // 没有答案原文时写不出「结合答案补充经验」，改用内置文案，避免模型反过来索要内容。
-            System.out.println("[西门子] 拿不到最佳答案内容，改用内置评论：" + answerId);
-            comment = task.fallbackContent("bestcomment");
-        } else {
-            comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
-                    + "最佳答案的原文是：" + answerText
-                    + "。评论要结合这段答案补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+        for (String solved : candidates) {
+            String[] parts = solved.split("-", 4);
+            if (parts.length < 3) {
+                continue;
+            }
+            String questionId = parts[0];
+            String categoryId = parts[1];
+            String answerId = parts[2];
+            String answerText = parts.length > 3 ? parts[3] : null;
+            String comment;
+            if (StrUtil.isBlank(answerText)) {
+                // 没有答案原文时写不出「结合答案补充经验」，改用内置文案，避免模型反过来索要内容。
+                System.out.println("[西门子] 拿不到最佳答案内容，改用内置评论：" + answerId);
+                comment = task.fallbackContent("bestcomment");
+            } else {
+                comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
+                        + "最佳答案的原文是：" + answerText
+                        + "。评论要结合这段答案补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+            }
+            if (StrUtil.isBlank(comment)) {
+                continue;
+            }
+            if (postBestAnswerComment(questionId, categoryId, answerId, comment)) {
+                return;
+            }
         }
-        if (StrUtil.isBlank(comment)) {
-            return;
-        }
+        System.out.println("[西门子] 候选最佳答案都没评成功");
+    }
+
+    /** 提交一条对最佳答案的评论，返回站点是否接受。 */
+    private boolean postBestAnswerComment(String questionId, String categoryId,
+                                          String answerId, String comment) {
         String url = task.supportBaseUrl() + "/service/answer/answerGeneric.ashx?action=AddEvaluate"
                 + "&aid=" + answerId + "&qid=" + questionId + "&cid=" + categoryId
                 + "&content=" + SiemensCheckInTask.encode(comment) + "&uid=" + task.currentUserId();
         task.waitBeforeSubmit(GROUP);
         SiemensCheckInTask.HttpResult result = task.post(url, "", task.supportHeaders(url));
         task.markSubmitted(GROUP);
-        System.out.println("[西门子] 评论最佳答案：" + SiemensCheckInTask.abbreviate(result.body));
+        String response = StrUtil.blankToDefault(result.body, "");
+        System.out.println("[西门子] 评论最佳答案：" + SiemensCheckInTask.abbreviate(response));
+        return response.contains("成功");
     }
 
     /** 在找答案提一个问题。表单字段要和页面脚本提交的完全一致，少一个就报「数据错误」。 */
@@ -456,43 +474,72 @@ final class SiemensAnswerActions {
     }
 
     /**
-     * 找一条有最佳答案的已解决问题。
+     * 找一条有最佳答案、且我这个账号还没评过的已解决问题。
      * 必须带 t=1（新解决的问题），否则接口按默认的待解决列表返回，永远找不到最佳答案。
      * <p>
-     * 按账号序号跳过前 N 条可评的答案，多个容器并行时才不会都扑在同一条上。
-     * 返回 questionId-categoryId-answerId-答案正文，答案正文用于生成评论；取不到时第四段为空。
+     * 从「账号序号」的位置开始往后轮转挑选，起点不同保证多个容器不会都扑在同一条上；
+     * 关键是**遇到已评过的要继续往后找**，而不是直接放弃 —— 列表前几条几天不变，
+     * 按固定索引取的话，第二天就会撞上自己昨天评过的那条，整个任务白跑。
+     *
+     * @return questionId-categoryId-answerId-答案正文 列表，调用方按顺序尝试；
+     *         一条都没有时返回空列表
      */
-    private String firstSolvedQuestionWithBestAnswer() {
-        int skip = task.accountIndex();
+    private List<String> solvedQuestionsWithBestAnswer() {
         List<String> candidates = new ArrayList<>();
-        for (int page = 1; page <= 2 && candidates.size() < skip + 1; page++) {
+        for (int page = 1; page <= 3; page++) {
             String url = task.supportBaseUrl() + "/service/answer/AjaxApi/New_Answer/NewAnswerList.ashx?"
                     + "action=getAnswerListData&cid=0&qType=all&qCategory=0&orderType=1&pageIndex=" + page + "&t=1";
             SiemensCheckInTask.HttpResult result = task.post(url, "", task.supportHeaders(url));
             JSONArray list = questionList(SiemensCheckInTask.parseObject(result.body));
-            if (list == null) {
-                continue;
+            if (list == null || list.isEmpty()) {
+                break;
             }
-            for (int i = 0; i < list.size() && candidates.size() < skip + 1; i++) {
+            for (int i = 0; i < list.size(); i++) {
                 JSONObject item = list.getJSONObject(i);
                 String questionId = item.getStr("Q_ID");
                 String categoryId = item.getStr("C_ID");
+                if (StrUtil.isBlank(questionId) || StrUtil.isBlank(categoryId)) {
+                    continue;
+                }
                 String detailUrl = task.supportBaseUrl() + "/service/answer/solved_"
                         + questionId + "_" + categoryId + ".html";
                 SiemensCheckInTask.Page detail = task.follow(detailUrl);
                 String answerId = detail == null ? null
                         : SiemensCheckInTask.attributeValue(detail.body, "data-bestanswerid");
-                if (StrUtil.isNotBlank(answerId) && !"0".equals(answerId)) {
-                    candidates.add(questionId + "-" + categoryId + "-" + answerId
-                            + "-" + plainText(item.getStr("A_Content"), 200));
+                if (StrUtil.isBlank(answerId) || "0".equals(answerId)) {
+                    continue;
                 }
+                // 页面上明确标着我已经评过，跳过，省得提交后被站点回 false。
+                if (detail.body.contains("data-currentuseriscomment='True'")) {
+                    continue;
+                }
+                // 自己提的问题不能评（站点禁止评论自己的内容）。
+                if (StrUtil.isNotBlank(task.currentUserId())
+                        && task.currentUserId().equals(item.getStr("U_ID"))) {
+                    continue;
+                }
+                candidates.add(questionId + "-" + categoryId + "-" + answerId
+                        + "-" + plainText(item.getStr("A_Content"), 200));
             }
         }
         if (candidates.isEmpty()) {
-            return null;
+            return candidates;
         }
-        // 候选不足以错开时退回第一条，避免因为跳过太多导致没有目标。
-        return candidates.get(Math.min(skip, candidates.size() - 1));
+        // 按账号序号轮转起点，多个容器错开；候选不够时取模回到开头，不浪费已有候选。
+        return rotate(candidates, task.accountIndex());
+    }
+
+    /** 把候选按 offset 轮转：offset 之前的元素挪到末尾，起点因此错开。 */
+    static List<String> rotate(List<String> items, int offset) {
+        if (items == null || items.isEmpty()) {
+            return items;
+        }
+        int start = Math.abs(offset) % items.size();
+        List<String> ordered = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            ordered.add(items.get((start + i) % items.size()));
+        }
+        return ordered;
     }
 
     /** 依次尝试多个选择器，取第一个有文字的结果。 */

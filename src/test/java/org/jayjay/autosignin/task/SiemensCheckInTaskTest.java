@@ -570,6 +570,20 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void rotatesCandidatesByAccountIndex() {
+        // 已解决列表头部几天不变，固定索引会让各账号第二天就撞上自己评过的目标。
+        // 这里验证「按账号序号轮转起点、遇到已评过的继续往后」的排序逻辑本身。
+        assertEquals(Arrays.asList("b", "c", "a"), SiemensAnswerActions.rotate(Arrays.asList("a", "b", "c"), 1));
+        assertEquals(Arrays.asList("c", "a", "b"), SiemensAnswerActions.rotate(Arrays.asList("a", "b", "c"), 2));
+        assertEquals(Arrays.asList("a", "b", "c"), SiemensAnswerActions.rotate(Arrays.asList("a", "b", "c"), 0));
+        // 序号超过候选数时取模，不能越界。
+        assertEquals(Arrays.asList("b", "c", "a"), SiemensAnswerActions.rotate(Arrays.asList("a", "b", "c"), 4));
+        // 空列表与单元素不能炸。
+        assertEquals(Collections.emptyList(), SiemensAnswerActions.rotate(Collections.emptyList(), 2));
+        assertEquals(Collections.singletonList("x"), SiemensAnswerActions.rotate(Collections.singletonList("x"), 5));
+    }
+
+    @Test
     public void parsesSiteDateMillis() {
         // 站点接口的时间是 /Date(毫秒)/，要能转成北京时间的日期。
         assertEquals("2026-11-16", SiemensPipeline.dateOf("/Date(1794791942350)/"));
