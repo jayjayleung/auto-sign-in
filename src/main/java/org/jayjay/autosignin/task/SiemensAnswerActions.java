@@ -25,8 +25,12 @@ final class SiemensAnswerActions {
     private static final String FAVORITES_URL = "/MySupport/AjaxAPI/CutomTags/CustomTagsCollectData.ashx";
     /** 收藏问答最多往前找几条，避免第一条已收藏时无解。 */
     private static final int FAVORITE_CANDIDATES = 6;
+    /** 提问成功后 302 跳转里的问答 ID，形如 solve_359432_1260.html。 */
+    private static final Pattern QUESTION_ID_PATTERN = Pattern.compile("solve_(\\d+)_\\d+\\.html");
 
     private final SiemensCheckInTask task;
+    /** 本次 submitQuestion 拿到的问答 ID，供 askQuestion 记账用；没提交成功时为 null。 */
+    private String lastSubmittedQuestionId;
 
     SiemensAnswerActions(SiemensCheckInTask task) {
         this.task = task;
@@ -156,18 +160,44 @@ final class SiemensAnswerActions {
         // 优先接兄弟账号刚提的问题：这样提问方下一轮才能采纳，形成三账号闭环。
         String[] sibling = task.pipeline().nextQuestionToAnswer(task.currentUserId());
         if (sibling != null) {
-            System.out.println("[西门子] 回答兄弟账号的提问：" + sibling[0]);
-            if (answerQuestion(sibling[0], sibling[1])) {
-                task.pipeline().recordAnswer(task.currentUserId(), sibling[0]);
+            String questionId = sibling[0];
+            System.out.println("[西门子] 回答兄弟账号的提问：" + questionId);
+            SiemensPipeline.AnswerState state = task.pipeline().answerState(questionId, task.currentUserId());
+            if (state == SiemensPipeline.AnswerState.ALREADY_ANSWERED) {
+                // 昨天答过但当时没记账（走的兜底路径），补登记即可，别再答一遍。
+                System.out.println("[西门子] 兄弟账号的问题我已答过，补登记：" + questionId);
+                task.pipeline().recordAnswer(task.currentUserId(), questionId);
+            } else if (state == SiemensPipeline.AnswerState.CLOSED) {
+                System.out.println("[西门子] 兄弟账号的问题已关闭，跳过：" + questionId);
+                // 标掉之后另外两个账号就不会再挑到它，省下两轮白打的请求。
+                task.pipeline().markQuestionClosed(questionId);
+            } else if (answerQuestion(questionId, sibling[1],
+                    sibling.length > 2 ? sibling[2] : null, sibling.length > 3 ? sibling[3] : null)) {
+                // 提问方下次运行据此采纳，闭环才算接上。
+                task.pipeline().recordAnswer(task.currentUserId(), questionId);
+                // 刚答完就该轮到自己采纳：兄弟账号今天答的可能是自己昨天的问题，
+                // 早点采纳，第三个账号当天就能评论这条新产生的「最佳答案」。
+                task.pipeline().adoptAfterAnswering(task.currentUserId());
                 return;
+            } else {
+                // 回答失败时释放认领，让另外两个账号今天还能接手。
+                task.pipeline().releaseClaim(questionId, task.currentUserId());
             }
             // 轮次里的问题可能已被关闭，退回站上随机挑。
         }
         // 列表接口自带标题和正文，直接用；取不到标题就不回答，避免把空主题喂给模型。
+        // 兜底路径是「碰运气」：兄弟账号刚提的问题也可能出现在列表最前面，
+        // 因此这里要能认出它并记账，同时避开兄弟已经答过的那些，免得三个账号答同一题。
+        Set<String> pendingSiblings = task.pipeline().pendingSiblingQuestions(task.currentUserId());
+        Set<String> answeredBySiblings = task.pipeline().questionsAnsweredBySiblings(task.currentUserId());
         for (String candidate : unsolvedQuestions(FAVORITE_CANDIDATES)) {
             // 格式：questionId-categoryId-askerId-标题-正文，标题和正文里可能含分隔符，所以限定段数。
             String[] parts = candidate.split("-", 5);
             if (parts.length < 3) {
+                continue;
+            }
+            if (answeredBySiblings.contains(parts[0])) {
+                System.out.println("[西门子] 兄弟账号已答过这条，换个问题：" + parts[0]);
                 continue;
             }
             String asker = parts[2];
@@ -177,24 +207,14 @@ final class SiemensAnswerActions {
             String questionTitle = parts.length > 3 ? parts[3] : null;
             String questionBody = parts.length > 4 ? parts[4] : null;
             if (answerQuestion(parts[0], parts[1], questionTitle, questionBody)) {
+                // 兜底路径也可能恰好答到兄弟账号的问题，同样要记账，否则提问方明天无法采纳。
+                if (pendingSiblings.contains(parts[0])) {
+                    task.pipeline().recordAnswer(task.currentUserId(), parts[0]);
+                }
                 return;
             }
-            return;
         }
         System.out.println("[西门子] 没有待回答的问题");
-    }
-
-    /** 按问题 ID 回答，标题和正文从接口补全；返回是否真的提交成功。 */
-    private boolean answerQuestion(String questionId, String categoryId) {
-        for (String candidate : unsolvedQuestions(FAVORITE_CANDIDATES)) {
-            String[] parts = candidate.split("-", 5);
-            if (parts.length >= 2 && questionId.equals(parts[0])) {
-                return answerQuestion(questionId, categoryId, parts.length > 3 ? parts[3] : null,
-                        parts.length > 4 ? parts[4] : null);
-            }
-        }
-        System.out.println("[西门子] 轮次里的问题已不在待解决列表，跳过：" + questionId);
-        return false;
     }
 
     /** 提交一条回答，标题和正文都可能为空；标题为空时用内置文案。 */
@@ -329,11 +349,32 @@ final class SiemensAnswerActions {
             task.markTaskFailed(true);
             return;
         }
-        // 提交成功后把问题 ID 记进轮次文件，兄弟账号下次据此回答，自己下次据此采纳。
-        task.pipeline().recordNewQuestion(task.currentUserId());
+        // 提交成功后把问题记进轮次文件，兄弟账号下次据此回答，自己下次据此采纳。
+        // 优先用 302 跳转里的 ID；取不到时退回「我的提问」里找当天最新那条。
+        String submittedId = lastSubmittedQuestionId;
+        if (StrUtil.isNotBlank(submittedId)) {
+            task.pipeline().recordQuestion(task.currentUserId(), submittedId, BOARD_ID, title, content);
+        } else {
+            task.pipeline().recordNewQuestion(task.currentUserId());
+        }
+    }
+
+    /**
+     * 从提问提交的响应里取问答 ID。
+     * 成功时站点返回 302，Location 指向 /service/answer/solve_{qid}_{cid}.html；
+     * 拿不到就返回 null，由调用方退回到「我的提问」里发现。
+     */
+    static String questionIdFromResult(SiemensCheckInTask.HttpResult result) {
+        if (result == null) {
+            return null;
+        }
+        Matcher matcher = QUESTION_ID_PATTERN.matcher(
+                StrUtil.blankToDefault(result.location, "") + " " + StrUtil.blankToDefault(result.body, ""));
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private boolean submitQuestion(String title, String content) {
+        lastSubmittedQuestionId = null;
         String page = task.supportBaseUrl() + "/service/answer/questionIn.aspx";
         SiemensCheckInTask.Page form = task.follow(page);
         if (form == null) {
@@ -360,6 +401,10 @@ final class SiemensAnswerActions {
         boolean rejected = titleTaken || response.contains("数据错误") || response.contains("参数不正确")
                 || response.contains("请选择问题类别");
         System.out.println("[西门子] 提问：" + SiemensCheckInTask.abbreviate(response));
+        if (!rejected) {
+            // 成功时站点 302 到 solve_{qid}_{cid}.html，顺手把 ID 存下来，省掉回查列表。
+            lastSubmittedQuestionId = questionIdFromResult(result);
+        }
         return !rejected;
     }
 

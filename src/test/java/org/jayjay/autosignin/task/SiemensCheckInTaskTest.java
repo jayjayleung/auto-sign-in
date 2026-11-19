@@ -539,6 +539,88 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void picksTheNewestSiblingQuestionAndSkipsStaleOnes() throws Exception {
+        // 待解决列表按时间倒序，老问题几小时后就沉到第二页以后。
+        // 必须从最新一条往回挑，否则会一直盯着最早那条没答上的问题，闭环永远转不起来。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("pipeline");
+        java.nio.file.Path file = dir.resolve(SiemensPipeline.FILE_NAME);
+        try {
+            SiemensPipeline pipeline = newPipeline(task, file);
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"));
+            writeRounds(file, cn.hutool.json.JSONUtil.createArray()
+                    // 六天前的老问题：超过等待窗口，提问方采纳期也快过了，不能再一直等它。
+                    .put(cn.hutool.json.JSONUtil.createObj()
+                            .set("qid", "100").set("cid", "1260").set("askerUid", "1579302")
+                            .set("askedAt", today.minusDays(6).toString())
+                            .set("title", "过期问题"))
+                    .put(cn.hutool.json.JSONUtil.createObj()
+                            .set("qid", "101").set("cid", "1260").set("askerUid", "1579302")
+                            .set("askedAt", today.toString())
+                            .set("title", "昨天的兄弟问题")));
+            pipeline = newPipeline(task, file);
+            String[] picked = pipeline.nextQuestionToAnswer("1820833");
+            // 100 已超期被跳过，101 是新问题，两个账号都该命中它。
+            assertNotEquals(null, picked);
+            assertEquals("101", picked[0]);
+            assertEquals("昨天的兄弟问题", picked[2]);
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+            java.nio.file.Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
+    public void siblingQuestionIsClaimedSoTwoAccountsDoNotPickTheSameOne() throws Exception {
+        // 三个容器启动时间只差一两分钟：不认领的话后启动的会挑中同一问题，
+        // 结果提问最晚的账号反而没人答。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("pipeline");
+        java.nio.file.Path file = dir.resolve(SiemensPipeline.FILE_NAME);
+        try {
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"));
+            writeRounds(file, cn.hutool.json.JSONUtil.createArray()
+                    .put(cn.hutool.json.JSONUtil.createObj()
+                            .set("qid", "200").set("cid", "1260").set("askerUid", "1579302")
+                            .set("askedAt", today.toString()).set("title", "A 的问题"))
+                    .put(cn.hutool.json.JSONUtil.createObj()
+                            .set("qid", "201").set("cid", "1260").set("askerUid", "1820814")
+                            .set("askedAt", today.toString()).set("title", "C 的问题")));
+
+            SiemensPipeline forNo1 = newPipeline(task, file);
+            String[] first = forNo1.nextQuestionToAnswer("1820814");
+            assertEquals("200", first[0]);
+
+            // 另一个账号再挑时必须换一条，不能又扑到 200 上。
+            SiemensPipeline forFanfan = newPipeline(task, file);
+            String[] second = forFanfan.nextQuestionToAnswer("1579302");
+            assertEquals("201", second[0]);
+        } finally {
+            java.nio.file.Files.deleteIfExists(file);
+            java.nio.file.Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
+    public void recordsQuestionWithTheRedirectedId() {
+        // 提问成功后站点 302 到 solve_{qid}_{cid}.html，直接据此记账，
+        // 不必回查待排序的列表（那时自己的问题可能已经翻页了）。
+        SiemensCheckInTask.HttpResult redirected = new SiemensCheckInTask.HttpResult(302, null,
+                "/service/answer/solve_359432_1260.html");
+        assertEquals("359432", SiemensAnswerActions.questionIdFromResult(redirected));
+
+        // 站点有时把跳转写成整页 HTML，也要能取到。
+        SiemensCheckInTask.HttpResult html = new SiemensCheckInTask.HttpResult(200,
+                "<h2>Object moved to <a href=\"/service/answer/solve_359433_1260.html\">here</a>.</h2>", null);
+        assertEquals("359433", SiemensAnswerActions.questionIdFromResult(html));
+
+        // 提交被拒时没有 ID，调用方退回「我的提问」里发现。
+        assertEquals(null, SiemensAnswerActions.questionIdFromResult(null));
+        assertEquals(null, SiemensAnswerActions.questionIdFromResult(
+                new SiemensCheckInTask.HttpResult(200, "此问题已经存在", null)));
+    }
+
+    @Test
     public void readsStoryRejectionReasonFromNotice() throws Exception {
         // 故事审核通知的正文格式：您提交的故事“标题”未通过审核,未通过原因：xxx。
         java.lang.reflect.Field field = SiemensForumActions.class.getDeclaredField("STORY_REVIEW");
@@ -964,5 +1046,27 @@ public class SiemensCheckInTaskTest {
             }
         }
         return new String(output.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    /** 用临时文件建一个轮次对象，替代默认的 /app/shared 目录。 */
+    private static SiemensPipeline newPipeline(SiemensCheckInTask task, java.nio.file.Path file)
+            throws Exception {
+        java.lang.reflect.Constructor<SiemensPipeline> ctor =
+                SiemensPipeline.class.getDeclaredConstructor(SiemensCheckInTask.class);
+        ctor.setAccessible(true);
+        SiemensPipeline pipeline = ctor.newInstance(task);
+        java.lang.reflect.Field field = SiemensPipeline.class.getDeclaredField("file");
+        field.setAccessible(true);
+        field.set(pipeline, file);
+        return pipeline;
+    }
+
+    /** 预置轮次文件，模拟兄弟容器已经写进来的提问。 */
+    private static void writeRounds(java.nio.file.Path file, JSONArray rounds) throws IOException {
+        JSONObject store = JSONUtil.createObj();
+        store.set("accounts", new JSONArray().put("1820833").put("1579302").put("1820814"));
+        store.set("rounds", rounds);
+        store.set("siblingComments", JSONUtil.createObj());
+        java.nio.file.Files.write(file, store.toString().getBytes(StandardCharsets.UTF_8));
     }
 }

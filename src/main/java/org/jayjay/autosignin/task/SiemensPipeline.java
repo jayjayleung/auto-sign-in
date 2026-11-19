@@ -50,6 +50,14 @@ final class SiemensPipeline {
      * 中间那天退回站上随机找问答评论，每日任务照样完成。
      */
     private static final int SIBLING_COMMENT_INTERVAL_DAYS = 2;
+    /**
+     * 轮次里的问题超过这么多天还没被兄弟账号回答，就不再等它。
+     * 站点只给提问者 7 天采纳期，而且待解决列表按时间倒序，老问题几小时后就沉到第二页以后，
+     * 一直盯着最早那条会永远撞上「已不在待解决列表」，闭环就断了。
+     */
+    private static final int ANSWER_WINDOW_DAYS = 3;
+    /** 每次运行最多回查几条漏记的兄弟回答，避免对站上打太多请求。 */
+    private static final int BACKFILL_LIMIT = 3;
 
     private final SiemensCheckInTask task;
     private final Path file;
@@ -85,6 +93,7 @@ final class SiemensPipeline {
         try {
             registerAccount(myUid);
             discoverOwnQuestions(myUid);
+            backfillMissingAnswers(myUid);
             adoptOwnAnswers(myUid);
         } catch (Exception e) {
             System.out.println("[西门子] 轮次准备失败：" + e.getMessage());
@@ -102,10 +111,12 @@ final class SiemensPipeline {
         if (StrUtil.isBlank(myUid)) {
             return false;
         }
-        load();
+        // 兄弟容器的采纳是几分钟前刚写进文件的，重读一次才看得到新的最佳答案。
+        reload();
         JSONArray rounds = store.getJSONArray("rounds");
         boolean hasCandidate = false;
-        for (int i = 0; i < rounds.size(); i++) {
+        // 从最新一条往回找：刚采纳的答案才有评论价值，也避免总盯着同一批旧问答。
+        for (int i = rounds.size() - 1; i >= 0; i--) {
             JSONObject round = rounds.getJSONObject(i);
             if (round == null || !Boolean.TRUE.equals(round.getBool("adopted"))) {
                 continue;
@@ -165,14 +176,21 @@ final class SiemensPipeline {
         return "";
     }
 
-    /** 挑一条兄弟账号提的、还没人回答的问题，返回 {qid, cid}；没有就返回 null。 */
+    /**
+     * 挑一条兄弟账号提的、还没人回答的问题，返回 {qid, cid, title}；没有就返回 null。
+     * <p>
+     * 必须从最新一条往前找：待解决列表按时间倒序，老问题几小时后就沉到第二页以后，
+     * 从前往后找会一直盯着最早那条没答上的问题，每次都撞「已不在待解决列表」，闭环永远转不起来。
+     * 超过 {@link #ANSWER_WINDOW_DAYS} 天的问题直接跳过，提问方的采纳期也快过了。
+     */
     String[] nextQuestionToAnswer(String myUid) {
         if (StrUtil.isBlank(myUid)) {
             return null;
         }
-        load();
+        // 兄弟容器的提问是几分钟前刚写进文件的，重读一次才看得到。
+        reload();
         JSONArray rounds = store.getJSONArray("rounds");
-        for (int i = 0; i < rounds.size(); i++) {
+        for (int i = rounds.size() - 1; i >= 0; i--) {
             JSONObject round = rounds.getJSONObject(i);
             if (round == null || Boolean.TRUE.equals(round.getBool("adopted"))) {
                 continue;
@@ -184,9 +202,155 @@ final class SiemensPipeline {
             if (round.getJSONObject("answer") != null) {
                 continue;
             }
-            return new String[]{round.getStr("qid"), round.getStr("cid")};
+            if (Boolean.TRUE.equals(round.getBool("adoptClosed"))) {
+                continue;
+            }
+            if (isStaleToAnswer(round) || claimedByOther(round, myUid)) {
+                continue;
+            }
+            String qid = round.getStr("qid");
+            String cid = round.getStr("cid");
+            String title = StrUtil.blankToDefault(round.getStr("title"), "");
+            String body = StrUtil.blankToDefault(round.getStr("body"), "");
+            claimQuestion(round, myUid);
+            return new String[]{qid, cid, title, body};
         }
         return null;
+    }
+
+    /**
+     * 这条是否已被另一个账号今天认领。
+     * 三个容器的启动时间只差一两分钟，不认领的话后启动的会挑中同一问题，
+     * 结果提问最晚的账号反而没人答，闭环又断在另一头。
+     */
+    private static boolean claimedByOther(JSONObject round, String myUid) {
+        if (Boolean.TRUE.equals(round.getBool("answerFailed"))) {
+            // 认领方明确失败过，今天让给别人试一次。
+            return false;
+        }
+        String claimUid = round.getStr("claimUid");
+        String claimAt = round.getStr("claimAt");
+        if (StrUtil.isBlank(claimUid) || claimUid.equals(myUid) || StrUtil.isBlank(claimAt)) {
+            return false;
+        }
+        return LocalDate.now(SHANGHAI).toString().equals(claimAt);
+    }
+
+    private void claimQuestion(JSONObject round, String myUid) {
+        round.set("claimUid", myUid);
+        round.set("claimAt", LocalDate.now(SHANGHAI).toString());
+        save();
+    }
+
+    /** 认领方回答失败时标记一下，让另外两个账号今天还能接手。 */
+    void releaseClaim(String qid, String myUid) {
+        if (StrUtil.isBlank(qid) || StrUtil.isBlank(myUid)) {
+            return;
+        }
+        reload();
+        JSONObject round = findRound(store.getJSONArray("rounds"), qid);
+        if (round == null || !myUid.equals(round.getStr("claimUid"))) {
+            return;
+        }
+        round.set("answerFailed", true);
+        save();
+    }
+
+    /**
+     * 兄弟账号的问题已关闭，谁都答不了，直接标掉。
+     * 不标的话另外两个账号还会依次挑到它，每次都白打一轮请求。
+     */
+    void markQuestionClosed(String qid) {
+        if (StrUtil.isBlank(qid)) {
+            return;
+        }
+        reload();
+        JSONObject round = findRound(store.getJSONArray("rounds"), qid);
+        if (round == null || Boolean.TRUE.equals(round.getBool("adoptClosed"))) {
+            return;
+        }
+        round.set("adoptClosed", true);
+        round.set("adoptClosedAt", LocalDate.now(SHANGHAI).toString());
+        save();
+    }
+
+    /** 问题问出来太久就不再等兄弟账号回答：站点采纳期有限，列表里也早翻不到它了。 */
+    private static boolean isStaleToAnswer(JSONObject round) {
+        String askedAt = round == null ? null : round.getStr("askedAt");
+        if (StrUtil.isBlank(askedAt)) {
+            // 老记录没写日期时按还能试处理，最多多打一次请求。
+            return false;
+        }
+        try {
+            long gap = java.time.temporal.ChronoUnit.DAYS.between(
+                    LocalDate.parse(askedAt.trim()), LocalDate.now(SHANGHAI));
+            return gap > ANSWER_WINDOW_DAYS;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 轮次里还没登记回答的兄弟问题 ID。
+     * 兜底「站上随机挑一条」时优先命中这些，顺手把闭环接上，而不是靠列表顺序碰运气。
+     */
+    Set<String> pendingSiblingQuestions(String myUid) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (StrUtil.isBlank(myUid)) {
+            return ids;
+        }
+        reload();
+        JSONArray rounds = store.getJSONArray("rounds");
+        for (int i = 0; i < rounds.size(); i++) {
+            JSONObject round = rounds.getJSONObject(i);
+            if (round == null || Boolean.TRUE.equals(round.getBool("adopted"))
+                    || Boolean.TRUE.equals(round.getBool("adoptClosed"))) {
+                continue;
+            }
+            String asker = round.getStr("askerUid");
+            if (StrUtil.isBlank(asker) || asker.equals(myUid) || round.getJSONObject("answer") != null) {
+                continue;
+            }
+            if (isStaleToAnswer(round)) {
+                continue;
+            }
+            ids.add(round.getStr("qid"));
+        }
+        return ids;
+    }
+
+    /** 丢弃内存副本，下次读取时以文件为准，能看到兄弟容器本轮刚写入的轮次。 */
+    private void reload() {
+        store = null;
+        load();
+    }
+
+    /**
+     * 兄弟账号已经答过的问题 ID。
+     * 兜底路径从站上的公共列表挑问题时，要避开这些：
+     * 三个账号答同一道题既像刷号，也会让提问方在多个兄弟答案之间做无用选择。
+     */
+    Set<String> questionsAnsweredBySiblings(String myUid) {
+        Set<String> ids = new LinkedHashSet<>();
+        reload();
+        JSONArray rounds = store.getJSONArray("rounds");
+        for (int i = 0; i < rounds.size(); i++) {
+            JSONObject round = rounds.getJSONObject(i);
+            if (round == null) {
+                continue;
+            }
+            String asker = round.getStr("askerUid");
+            JSONObject answer = round.getJSONObject("answer");
+            String answerer = answer == null ? null : answer.getStr("uid");
+            if (StrUtil.isBlank(answerer) || answerer.equals(myUid) || StrUtil.isBlank(asker)) {
+                continue;
+            }
+            // 只有兄弟账号之间的问答才需要避开，陌生人的问题照常参与挑选。
+            if (accountIds().contains(asker)) {
+                ids.add(round.getStr("qid"));
+            }
+        }
+        return ids;
     }
 
     /** 记下刚提的问题，供兄弟账号回答、自己下一次采纳。 */
@@ -199,21 +363,42 @@ final class SiemensPipeline {
             if (newest == null) {
                 return;
             }
-            String qid = newest.getStr("Q_ID");
-            if (StrUtil.isBlank(qid)) {
-                return;
-            }
-            load();
+            recordQuestion(myUid, newest.getStr("Q_ID"), newest.getStr("C_ID"),
+                    newest.getStr("Q_Title"), null);
+        } catch (Exception e) {
+            System.out.println("[西门子] 记录提问失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 按已知的问答 ID 记一条轮次。
+     * <p>
+     * 提问接口提交成功后会 302 到 solve_{qid}_{cid}.html，据此直接记账，
+     * 不必再回查待解决列表：列表按时间倒序，等我们回查时自己的问题可能已经翻页了。
+     * 标题和正文一起存下来，兄弟账号回答时就不用再去列表里找（那边早就找不到了）。
+     */
+    void recordQuestion(String myUid, String qid, String cid, String title, String body) {
+        if (StrUtil.isBlank(myUid) || StrUtil.isBlank(qid)) {
+            return;
+        }
+        try {
+            // 兄弟容器可能刚写过文件，先重读再改，否则保存时会把别人的轮次盖掉。
+            reload();
             JSONArray rounds = store.getJSONArray("rounds");
             if (findRound(rounds, qid) != null) {
                 return;
             }
             JSONObject round = JSONUtil.createObj();
             round.set("qid", qid);
-            round.set("cid", newest.getStr("C_ID"));
+            round.set("cid", StrUtil.blankToDefault(cid, SiemensAnswerActions.BOARD_ID));
             round.set("askerUid", myUid);
             round.set("askedAt", LocalDate.now(SHANGHAI).toString());
-            round.set("title", newest.getStr("Q_Title"));
+            if (StrUtil.isNotBlank(title)) {
+                round.set("title", title);
+            }
+            if (StrUtil.isNotBlank(body)) {
+                round.set("body", body);
+            }
             rounds.put(round);
             trim(rounds);
             save();
@@ -233,7 +418,8 @@ final class SiemensPipeline {
             if (mine == null) {
                 return;
             }
-            load();
+            // 提问方可能刚写过文件，先重读再改，否则保存时会把它的新轮次盖掉。
+            reload();
             JSONArray rounds = store.getJSONArray("rounds");
             JSONObject round = findRound(rounds, qid);
             if (round == null || round.getJSONObject("answer") != null) {
@@ -251,11 +437,133 @@ final class SiemensPipeline {
         }
     }
 
+    /** 兄弟问题能否由我来回答的判定结果。 */
+    enum AnswerState {
+        /** 可以回答。 */
+        OPEN("可以回答"),
+        /** 问题已关闭或已解决，谁都答不了。 */
+        CLOSED("已关闭"),
+        /** 我其实已经答过了，只是轮次文件里没记上。 */
+        ALREADY_ANSWERED("我已答过");
+
+        final String label;
+
+        AnswerState(String label) {
+            this.label = label;
+        }
+    }
+
+    /**
+     * 兄弟账号的问题现在能不能由我回答。
+     * <p>
+     * 一次请求同时判三件事：Q_Status 是否为待解决、我是不是已经答过这条
+     * （昨天答过但没记账时轮次里仍然是空的，不挡住就会重复回答同一个问题）、以及问题是否还在。
+     * 读不到回答列表时按 {@link AnswerState#OPEN} 处理，避免一次接口抖动就放弃整轮。
+     */
+    AnswerState answerState(String qid, String myUid) {
+        if (StrUtil.isBlank(qid)) {
+            return AnswerState.CLOSED;
+        }
+        JSONArray answers = answers(qid);
+        if (answers.isEmpty()) {
+            return AnswerState.OPEN;
+        }
+        JSONObject first = answers.getJSONObject(0);
+        int status = first == null ? 0 : parseInt(first.getStr("Q_Status"));
+        if (status == 1 || status == 3) {
+            return AnswerState.CLOSED;
+        }
+        if (StrUtil.isNotBlank(myUid)) {
+            for (int i = 0; i < answers.size(); i++) {
+                JSONObject item = answers.getJSONObject(i);
+                if (item != null && myUid.equals(item.getStr("U_ID"))) {
+                    return AnswerState.ALREADY_ANSWERED;
+                }
+            }
+        }
+        return AnswerState.OPEN;
+    }
+
+    /**
+     * 回查「已采纳但轮次里没登记回答」之外的情况里更常见的一种：
+     * 兄弟账号确实回答了，但它当时走的兜底路径（站上随机挑）没记进轮次文件，
+     * 于是提问方第二天找不到可采纳的答案，闭环就断了。
+     * <p>
+     * 这里在自己提的问题上回查回答列表，发现兄弟账号的回答就补登记。
+     * 只处理自己名下的、最近还没采纳的轮次，且每次限 {@link #BACKFILL_LIMIT} 条。
+     */
+    private void backfillMissingAnswers(String myUid) {
+        load();
+        JSONArray rounds = store.getJSONArray("rounds");
+        Set<String> siblings = accountIds();
+        int checked = 0;
+        boolean changed = false;
+        for (int i = rounds.size() - 1; i >= 0; i--) {
+            JSONObject round = rounds.getJSONObject(i);
+            if (round == null || Boolean.TRUE.equals(round.getBool("adopted"))
+                    || Boolean.TRUE.equals(round.getBool("adoptClosed"))) {
+                continue;
+            }
+            if (!myUid.equals(round.getStr("askerUid")) || round.getJSONObject("answer") != null) {
+                continue;
+            }
+            if (isStaleToAnswer(round)) {
+                continue;
+            }
+            if (checked >= BACKFILL_LIMIT) {
+                break;
+            }
+            checked++;
+            String qid = round.getStr("qid");
+            JSONArray answers = answers(qid);
+            for (int j = 0; j < answers.size(); j++) {
+                JSONObject answer = answers.getJSONObject(j);
+                String uid = answer == null ? null : answer.getStr("U_ID");
+                if (StrUtil.isBlank(uid) || myUid.equals(uid) || !siblings.contains(uid)) {
+                    continue;
+                }
+                JSONObject recorded = JSONUtil.createObj();
+                recorded.set("aid", answer.getStr("A_ID"));
+                recorded.set("uid", uid);
+                recorded.set("at", dateOf(answer.getStr("A_InputTime")));
+                round.set("answer", recorded);
+                changed = true;
+                System.out.println("[西门子] 补登记兄弟账号的回答：" + qid + "/" + answer.getStr("A_ID"));
+                if (answer.getInt("IsBestAnswer", 0) == 1) {
+                    round.set("adopted", true);
+                    round.set("adoptedAt", dateOf(answer.getStr("A_UpdateTime")));
+                }
+                break;
+            }
+        }
+        if (changed) {
+            save();
+        }
+    }
+
     // ==================== 采纳 ====================
+
+    /**
+     * 把自己名下「兄弟账号已回答」的问题采纳为最佳答案。
+     * 问答任务做完后再调一次：兄弟容器可能刚在本轮回答了昨天的问题，这时才够条件采纳，
+     * 当天就能产出可供第三个账号互评的最佳答案，不用等到明天。
+     */
+    void adoptAfterAnswering(String myUid) {
+        if (StrUtil.isBlank(myUid)) {
+            return;
+        }
+        try {
+            backfillMissingAnswers(myUid);
+            adoptOwnAnswers(myUid);
+        } catch (Exception e) {
+            System.out.println("[西门子] 采纳兄弟回答失败：" + e.getMessage());
+        }
+    }
 
     /** 把「我的问题 + 兄弟账号的回答」采纳为最佳答案。 */
     private void adoptOwnAnswers(String myUid) {
-        load();
+        // 采纳前重读，避免把兄弟容器刚写入的轮次在 save() 时盖掉。
+        reload();
         JSONArray rounds = store.getJSONArray("rounds");
         Set<String> siblings = accountIds();
         for (int i = 0; i < rounds.size(); i++) {
