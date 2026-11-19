@@ -45,9 +45,12 @@ final class SiemensPipeline {
     /** 轮次文件保留的最大条数，避免无限增长。 */
     private static final int MAX_ROUNDS = 60;
     /**
-     * 同一个账号两次互评之间至少间隔的天数。
-     * 三个账号天天互相评论容易被看出账号关系，隔一天一次把节奏打散，
-     * 中间那天退回站上随机找问答评论，每日任务照样完成。
+     * 同一个账号两次互评之间至少间隔的天数：隔天一次。
+     * <p>
+     * 光靠这个天数只能做到「每个账号各自隔天」，实际会漂移成
+     * A/C 在 11-17、B 在 11-19 这种错位状态。所以真正决定哪天互评的是
+     * {@link #isSiblingCommentDay(LocalDate)}：三个账号共用同一份日历，
+     * 隔天统一开口，要么三个一起评，要么三个一起休息。
      */
     private static final int SIBLING_COMMENT_INTERVAL_DAYS = 2;
     /**
@@ -135,8 +138,8 @@ final class SiemensPipeline {
             hasCandidate = true;
             // 间隔检查放在确认有候选之后：没有候选时不必打这条日志。
             if (!siblingCommentAllowed(myUid)) {
-                System.out.println("[西门子] 距上次互评不足 "
-                        + (SIBLING_COMMENT_INTERVAL_DAYS - 1) + " 天，今天不互评，改评站上问答");
+                System.out.println("[西门子] 今天不是互评日（三个账号每隔 "
+                        + (SIBLING_COMMENT_INTERVAL_DAYS - 1) + " 天同一天互评），改评站上问答");
                 return false;
             }
             String qid = round.getStr("qid");
@@ -739,16 +742,66 @@ final class SiemensPipeline {
     }
 
     /**
-     * 是否允许这个账号今天互评：上次互评距今不足
-     * {@link #SIBLING_COMMENT_INTERVAL_DAYS} 天就跳过，隔天一次。
+     * 是否允许这个账号今天互评。
+     * <p>
+     * 先看共享的日历：三个账号必须落在同一天互评，否则会漂移成各自不同的日期，
+     * 结果每天只有一两个账号能评，剩下的最佳答案一直排不上队。
+     * 再看本账号自己有没有评过，保证同一天不会重复提交。
      */
     private boolean siblingCommentAllowed(String uid) {
+        LocalDate today = LocalDate.now(SHANGHAI);
+        if (!isSiblingCommentDay(today)) {
+            return false;
+        }
         LocalDate last = lastSiblingComment(uid);
         if (last == null) {
             return true;
         }
-        long gap = java.time.temporal.ChronoUnit.DAYS.between(last, LocalDate.now(SHANGHAI));
+        long gap = java.time.temporal.ChronoUnit.DAYS.between(last, today);
         return gap >= SIBLING_COMMENT_INTERVAL_DAYS;
+    }
+
+    /**
+     * 三个账号共用的互评日历：隔天开口，所有账号在同一天一起评。
+     * <p>
+     * 用轮次文件里最早的那个互评日期当锚点，之后每
+     * {@link #SIBLING_COMMENT_INTERVAL_DAYS} 天开口一次。
+     * 锚点固定不动，所以不管哪个容器先启动、谁先写文件，大家算出来的日期都一样。
+     * 还没有任何互评记录时直接开口，让功能上线当天就能用起来。
+     */
+    private boolean isSiblingCommentDay(LocalDate today) {
+        LocalDate anchor = commentAnchor();
+        if (anchor == null) {
+            return true;
+        }
+        long gap = java.time.temporal.ChronoUnit.DAYS.between(anchor, today);
+        // gap 为负说明系统时间被往回调过，按开口处理，别把人永久卡死。
+        return gap < 0 || gap % SIBLING_COMMENT_INTERVAL_DAYS == 0;
+    }
+
+    /** 互评日历的锚点：轮次文件里记录过的所有互评日期中最早的一个。 */
+    private LocalDate commentAnchor() {
+        load();
+        JSONObject comments = store.getJSONObject("siblingComments");
+        if (comments == null || comments.isEmpty()) {
+            return null;
+        }
+        LocalDate anchor = null;
+        for (String key : comments.keySet()) {
+            String value = comments.getStr(key);
+            if (StrUtil.isBlank(value)) {
+                continue;
+            }
+            try {
+                LocalDate day = LocalDate.parse(value.trim());
+                if (anchor == null || day.isBefore(anchor)) {
+                    anchor = day;
+                }
+            } catch (Exception e) {
+                // 单条坏记录不该拖垮整个日历，跳过即可。
+            }
+        }
+        return anchor;
     }
 
     private void markSiblingComment(String uid) {

@@ -355,12 +355,17 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
-    public void siblingCommentsAreSpacedByAtLeastOneDay() throws Exception {
-        // 互评隔天一次，避免三个账号天天互评被看出关系。
+    public void allThreeAccountsCommentOnTheSameDayAndRestTogether() throws Exception {
+        // 关键点：不是「每个账号各自隔天」，而是三个账号共用一份日历、同一天一起评。
+        // 各自隔天会漂移成 A/C 在 17 号、B 在 19 号，结果每天只有一两个账号能动。
         SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
         java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("pipeline");
         java.nio.file.Path file = dir.resolve(SiemensPipeline.FILE_NAME);
         try {
+            String a = "1820833";
+            String b = "1579302";
+            String c = "1820814";
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"));
             java.lang.reflect.Constructor<SiemensPipeline> ctor =
                     SiemensPipeline.class.getDeclaredConstructor(SiemensCheckInTask.class);
             ctor.setAccessible(true);
@@ -376,37 +381,71 @@ public class SiemensCheckInTaskTest {
                     SiemensPipeline.class.getDeclaredMethod("markSiblingComment", String.class);
             mark.setAccessible(true);
 
-            // 从没互评过：允许。
-            assertTrue((Boolean) allowed.invoke(pipeline, "1820833"));
+            // 从没互评过：三个账号都允许。
+            for (String uid : new String[]{a, b, c}) {
+                assertTrue(uid + " 首次应允许", (Boolean) allowed.invoke(pipeline, uid));
+            }
 
-            mark.invoke(pipeline, "1820833");
-            // 同一天再跑：不允许，否则就是天天互评。
-            assertFalse((Boolean) allowed.invoke(pipeline, "1820833"));
+            // 三个账号今天一起评过：当天再跑谁都不允许，保证同一天不重复。
+            for (String uid : new String[]{a, b, c}) {
+                mark.invoke(pipeline, uid);
+            }
+            for (String uid : new String[]{a, b, c}) {
+                assertFalse(uid + " 当天已评过不应再评", (Boolean) allowed.invoke(pipeline, uid));
+            }
 
-            // 昨天互评过：仍然不允许，必须隔满一天。
-            java.time.LocalDate yesterday = java.time.LocalDate.now(
-                    java.time.ZoneId.of("Asia/Shanghai")).minusDays(1);
-            java.lang.reflect.Method last =
-                    SiemensPipeline.class.getDeclaredMethod("lastSiblingComment", String.class);
-            last.setAccessible(true);
-            cn.hutool.json.JSONObject store = cn.hutool.json.JSONUtil.parseObj(
-                    new String(java.nio.file.Files.readAllBytes(file), StandardCharsets.UTF_8));
-            store.getJSONObject("siblingComments").set("1820833", yesterday.toString());
-            java.nio.file.Files.write(file, store.toString().getBytes(StandardCharsets.UTF_8));
-            java.lang.reflect.Field storeField = SiemensPipeline.class.getDeclaredField("store");
-            storeField.setAccessible(true);
-            storeField.set(pipeline, null);
-            assertFalse((Boolean) allowed.invoke(pipeline, "1820833"));
+            // 第二天（隔天休息日）：三个账号一起休息，不会只有某一个偷跑。
+            setCommentDates(file, today.minusDays(1), a, b, c);
+            resetStore(pipeline);
+            for (String uid : new String[]{a, b, c}) {
+                assertFalse(uid + " 休息日不应互评", (Boolean) allowed.invoke(pipeline, uid));
+            }
 
-            // 前天互评过：允许。
-            store.getJSONObject("siblingComments").set("1820833", yesterday.minusDays(1).toString());
-            java.nio.file.Files.write(file, store.toString().getBytes(StandardCharsets.UTF_8));
-            storeField.set(pipeline, null);
-            assertTrue((Boolean) allowed.invoke(pipeline, "1820833"));
+            // 后天（隔天开口日）：三个账号一起恢复。
+            setCommentDates(file, today.minusDays(2), a, b, c);
+            resetStore(pipeline);
+            for (String uid : new String[]{a, b, c}) {
+                assertTrue(uid + " 开口日应允许互评", (Boolean) allowed.invoke(pipeline, uid));
+            }
+
+            // 错位状态（A/C 是 2 天前、B 是 1 天前）：日历取最早那天当锚点，所以今天是开口日。
+            // A/C 距上次已满 2 天，正常参与；B 昨天刚评过，自己再休息一天。
+            // 这样日历不会因为某个账号晚评一天就把另外两个也一起拖住。
+            setCommentDates(file, today.minusDays(1), b);
+            setCommentDates(file, today.minusDays(2), a, c);
+            resetStore(pipeline);
+            assertTrue(a + " 错位状态下日历开口、自身已满间隔，应允许",
+                    (Boolean) allowed.invoke(pipeline, a));
+            assertTrue(c + " 错位状态下日历开口、自身已满间隔，应允许",
+                    (Boolean) allowed.invoke(pipeline, c));
+            assertFalse(b + " 昨天刚评过，不应连续两天评", (Boolean) allowed.invoke(pipeline, b));
         } finally {
             java.nio.file.Files.deleteIfExists(file);
             java.nio.file.Files.deleteIfExists(dir);
         }
+    }
+
+    /** 把指定账号的上次互评日期改成给定日期，其余账号保持原样。 */
+    private static void setCommentDates(java.nio.file.Path file, java.time.LocalDate day, String... uids)
+            throws IOException {
+        JSONObject store = JSONUtil.parseObj(
+                new String(java.nio.file.Files.readAllBytes(file), StandardCharsets.UTF_8));
+        JSONObject comments = store.getJSONObject("siblingComments");
+        if (comments == null) {
+            comments = JSONUtil.createObj();
+            store.set("siblingComments", comments);
+        }
+        for (String uid : uids) {
+            comments.set(uid, day.toString());
+        }
+        java.nio.file.Files.write(file, store.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 清掉内存缓存，让下次读取以文件为准。 */
+    private static void resetStore(SiemensPipeline pipeline) throws Exception {
+        java.lang.reflect.Field storeField = SiemensPipeline.class.getDeclaredField("store");
+        storeField.setAccessible(true);
+        storeField.set(pipeline, null);
     }
 
     @Test
