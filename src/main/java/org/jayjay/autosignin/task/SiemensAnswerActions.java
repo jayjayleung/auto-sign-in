@@ -222,16 +222,20 @@ final class SiemensAnswerActions {
                                    String questionTitle, String questionBody) {
         String answer;
         if (StrUtil.isBlank(questionTitle)) {
-            System.out.println("[西门子] 拿不到问题标题，改用内置回答：" + questionId);
-            answer = task.fallbackContent("answer");
-        } else {
-            String prompt = "请用中文回答西门子找答案里的一个技术问题，问题标题是："
-                    + questionTitle
-                    + (StrUtil.isBlank(questionBody) ? "" : "。问题描述：" + questionBody)
-                    + "。回答要具体、可执行，200字以内，不要标题，不要分点。";
-            answer = task.generateUnique(prompt, "answer");
+            // 拿不到问题内容就不回答：通用答案很容易和新问题完全对不上。
+            // 这不属于失败，换个候选问题即可，因此不计入连续失败。
+            System.out.println("[西门子] 拿不到问题标题，跳过回答：" + questionId);
+            task.markTaskNoTarget();
+            return false;
         }
+        String prompt = "请用中文回答西门子找答案里的一个技术问题。"
+                + "问题标题：" + questionTitle
+                + (StrUtil.isBlank(questionBody) ? "" : "。问题描述：" + questionBody)
+                + "。要求：先针对问题里描述的具体现象给出判断，再给出可以照着做的排查步骤，"
+                + "200字以内，不要标题，不要分点，不要写成通用建议。";
+        answer = task.generateRelated(prompt, "answer", questionTitle + " " + StrUtil.blankToDefault(questionBody, ""));
         if (StrUtil.isBlank(answer)) {
+            System.out.println("[西门子] 回答内容生成失败，跳过：" + questionId);
             return false;
         }
         String body = "A_Content=" + SiemensCheckInTask.encode(answer);
@@ -251,12 +255,14 @@ final class SiemensAnswerActions {
         // 评论按该条答案的原文生成，不能套用通用措辞，否则和评论区其他内容一样会答非所问。
         boolean done = task.pipeline().commentSiblingAnswer(task.currentUserId(), answerText -> {
             if (StrUtil.isBlank(answerText)) {
-                System.out.println("[西门子] 拿不到互评答案的原文，改用内置评论");
-                return task.fallbackContent("bestcomment");
+                // 没有答案原文就写不出贴合内容的评论，宁可跳过也不要发通用评论。
+                System.out.println("[西门子] 拿不到互评答案的原文，跳过本次互评");
+                return null;
             }
-            return task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
-                    + "最佳答案的原文是：" + answerText
-                    + "。评论要结合这段答案补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+            return task.generateRelated("请用中文写一条对西门子找答案里最佳答案的评论。"
+                    + "最佳答案原文：" + answerText + "。"
+                    + "要求：针对这段答案里的具体做法或结论，补充一条自己的实际经验或不同看法，"
+                    + "100字以内，口语，不要分点，不要写成泛泛的称赞。", "bestcomment", answerText);
         });
         if (done) {
             return;
@@ -279,14 +285,14 @@ final class SiemensAnswerActions {
             String answerText = parts.length > 3 ? parts[3] : null;
             String comment;
             if (StrUtil.isBlank(answerText)) {
-                // 没有答案原文时写不出「结合答案补充经验」，改用内置文案，避免模型反过来索要内容。
-                System.out.println("[西门子] 拿不到最佳答案内容，改用内置评论：" + answerId);
-                comment = task.fallbackContent("bestcomment");
-            } else {
-                comment = task.generateUnique("请用中文写一条对西门子找答案里最佳答案的评论，"
-                        + "最佳答案的原文是：" + answerText
-                        + "。评论要结合这段答案补充一个实际经验点，100字以内，口语，不要分点。", "bestcomment");
+                // 没有答案原文时写不出「结合答案补充经验」，跳过这条，避免答非所问。
+                System.out.println("[西门子] 拿不到最佳答案内容，跳过：" + answerId);
+                continue;
             }
+            comment = task.generateRelated("请用中文写一条对西门子找答案里最佳答案的评论。"
+                    + "最佳答案原文：" + answerText + "。"
+                    + "要求：针对这段答案里的具体做法或结论，补充一条自己的实际经验或不同看法，"
+                    + "100字以内，口语，不要分点，不要写成泛泛的称赞。", "bestcomment", answerText);
             if (StrUtil.isBlank(comment)) {
                 continue;
             }
@@ -519,7 +525,7 @@ final class SiemensAnswerActions {
                     continue;
                 }
                 candidates.add(questionId + "-" + categoryId + "-" + answerId
-                        + "-" + plainText(item.getStr("A_Content"), 200));
+                        + "-" + plainText(item.getStr("A_Content"), 600));
             }
         }
         if (candidates.isEmpty()) {

@@ -770,6 +770,176 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void rejectsRepliesThatDriftAwayFromTheOriginalPost() {
+        String post = "1516 带 ET200SP 从站，运行几小时后偶发掉站，诊断缓冲区报 F07452。";
+        // 贴着原帖、引用了型号和报警码的回帖要放行。
+        assertTrue(SiemensCheckInTask.mentionsSource(
+                "F07452 一般先看站点的更新时间设置，ET200SP 站多时别调得太短。", post));
+        // 只写型号简写也算命中。
+        assertTrue(SiemensCheckInTask.mentionsSource("我们那条线的 1516 也这么调过。", post));
+        // 和原帖毫无关系的通用建议必须拦下。
+        assertFalse(SiemensCheckInTask.mentionsSource(
+                "这个思路挺实用的，现场调试时确实能少走弯路。", post));
+        assertFalse(SiemensCheckInTask.mentionsSource("感谢分享，参考价值很大。", post));
+
+        // 纯中文、没有技术锚点时退回字符重合度判断。
+        String chinese = "产线停机后上位机全是通讯报警，顺着线查过去是施工碰松的网线。";
+        assertTrue(SiemensCheckInTask.mentionsSource(
+                "顺着线查过去这个做法对，通讯报警先查物理层。", chinese));
+        assertFalse(SiemensCheckInTask.mentionsSource(
+                "建议先算一下 IO 点数的增长余量，别只按现在的需求配。", chinese));
+
+        assertFalse(SiemensCheckInTask.mentionsSource(null, post));
+        assertFalse(SiemensCheckInTask.mentionsSource("随便一句话", null));
+    }
+
+    @Test
+    public void extractsTechnicalAnchorsFromPostText() {
+        List<String> anchors = SiemensCheckInTask.technicalAnchors(
+                "S7-1500 通过 PROFINET 读 V90 参数，报 F07452，用 TIA 查诊断缓冲区。");
+        assertTrue(anchors.contains("S7-1500"));
+        assertTrue(anchors.contains("PROFINET"));
+        assertTrue(anchors.contains("V90"));
+        assertTrue(anchors.contains("F07452"));
+        // 纯数字不该被当成锚点，否则任何内容都能命中。
+        assertFalse(SiemensCheckInTask.technicalAnchors("一共 15 个从站，跑了 3 小时").contains("15"));
+    }
+
+    @Test
+    public void relatedContentHasNoBuiltInFallback() {
+        // 回帖、评论、回答必须贴合原帖，这三类不许有通用兜底文案。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        assertEquals(null, task.fallbackContent("reply"));
+        assertEquals(null, task.fallbackContent("postcomment"));
+        assertEquals(null, task.fallbackContent("bestcomment"));
+        assertEquals(null, task.fallbackContent("answer"));
+        // 自己发起的内容仍然保留兜底，避免 AI 不可用时整项任务失败。
+        assertFalse(task.fallbackContent("posttitle").trim().isEmpty());
+        assertFalse(task.fallbackContent("askbody").trim().isEmpty());
+    }
+
+    @Test
+    public void onlyRepliesToPostsWithATechnicalTopic() {
+        // 「最新发帖」里混着谈天说地、活动、版务，这类帖没有技术主题，
+        // 对着它们写出来的回帖必然答非所问，必须在挑帖阶段就排除。
+        assertFalse(SiemensForumActions.isTechnicalText("今天天气不错，大家周末都去哪儿玩"));
+        assertFalse(SiemensForumActions.isTechnicalText("【活动】2026 年会报名开始啦"));
+        assertFalse(SiemensForumActions.isTechnicalText("版规更新公告，请各位注意"));
+        assertFalse(SiemensForumActions.isTechnicalText(""));
+        assertFalse(SiemensForumActions.isTechnicalText(null));
+
+        // 含型号、报警码、技术用语的就是技术帖。
+        assertTrue(SiemensForumActions.isTechnicalText("S7-1500 与第三方 PN 设备通讯超时"));
+        assertTrue(SiemensForumActions.isTechnicalText("ET200SP 偶发掉站，诊断缓冲区报 F07452"));
+        assertTrue(SiemensForumActions.isTechnicalText("V90 回零偏移怎么调"));
+        assertTrue(SiemensForumActions.isTechnicalText("博途里怎么批量分配设备名"));
+
+        // 标题是生活话题、正文也没技术内容时整帖判为非技术帖。
+        assertFalse(SiemensForumActions.isTechnicalTopic(
+                new SiemensForumActions.Topic("1", "66", "周末去哪儿玩", "天气不错出去走走", "42", "")));
+        assertTrue(SiemensForumActions.isTechnicalTopic(
+                new SiemensForumActions.Topic("2", "66", "掉站排查", "1516 带 ET200 偶发掉站", "42", "")));
+        assertFalse(SiemensForumActions.isTechnicalTopic(null));
+    }
+
+    @Test
+    public void doesNotTreatCommercialOrLinkOnlyPostsAsTechnical() {
+        // 「国内几大直流电机厂商销售情况」是商业帖，命中「电机」不该算技术帖。
+        assertFalse(SiemensForumActions.isTechnicalText("国内几大直流电机厂商销售情况"));
+        // 官网更新公告：正文里的链接不能被当成技术线索。
+        assertFalse(SiemensForumActions.isTechnicalText(
+                "今天去官网浏览，发现网站刷新了新网址 https://www.ad.siemens.com.cn/topicportal/index_90.html"));
+        assertFalse(SiemensForumActions.isTechnicalText("详见 www.example.com 或 siemens.com.cn"));
+        // 链接剔掉后仍保留真正的型号锚点。
+        assertTrue(SiemensForumActions.isTechnicalText(
+                "参考 https://www.ad.siemens.com.cn/a.html 里的 S7-1500 组态说明"));
+    }
+
+    @Test
+    public void activityPostsAreRejectedEvenWhenTheyMentionProducts() {
+        // 活动帖正文常提到产品名，会被关键词命中，但主题不是技术问题，必须否决。
+        SiemensForumActions.Topic activity = new SiemensForumActions.Topic("1", "25",
+                "一路上有你｜问答20条得限量纪念杯 · 找答案20周年专场",
+                "参与就有机会获得 S7-200 SMART 纪念品，报名开始", "42", "");
+        assertTrue("正文命中技术词", SiemensForumActions.isTechnicalText(activity.body));
+        assertFalse("活动标题应否决", SiemensForumActions.isTechnicalTopic(activity));
+
+        assertTrue(SiemensForumActions.isNonTechnicalPost(new SiemensForumActions.Topic(
+                "2", "66", "【活动】2026 年会报名开始啦", "技术交流", "42", "")));
+        assertTrue(SiemensForumActions.isNonTechnicalPost(new SiemensForumActions.Topic(
+                "3", "66", "二手模块转让", "S7-1500", "42", "")));
+        // 正常技术帖不能被否决项误杀：正文提到「领取」也不行，因为只看标题。
+        assertFalse(SiemensForumActions.isNonTechnicalPost(new SiemensForumActions.Topic(
+                "4", "66", "S7-1500 掉站排查",
+                "报警后需要到现场领取诊断记录，再分析缓冲区", "42", "")));
+    }
+
+    @Test
+    public void keepsProgrammingDiscussionsAsTechnical() {
+        // 「L 区临时变量在各系列都不保持」是纯技术帖，正文里没有型号也没有常见关键词，
+        // 收紧词表时曾被误判成非技术帖，这里固化住。
+        SiemensForumActions.Topic programming = new SiemensForumActions.Topic("1", "50",
+                "L 区临时变量在各系列都不保持，哪些场景误用 L 区会出问题？",
+                "公司新招的同事把状态位放在 L 区，块一执行完就丢了，中断 OB 和 FB 嵌套调用尤其危险",
+                "42", "");
+        assertTrue("编程术语应判为技术帖", SiemensForumActions.isTechnicalTopic(programming));
+        assertTrue(SiemensForumActions.isTechnicalText("中断 OB 里用临时变量要注意什么"));
+        assertTrue(SiemensForumActions.isTechnicalText("背景 DB 和多重背景的区别"));
+        assertTrue(SiemensForumActions.isTechnicalText("用 SCL 写循环比 STL 慢吗"));
+    }
+
+    @Test
+    public void urlsDoNotCountAsTechnicalAnchors() {
+        // 链接里的 https/www/siemens 若被当成锚点，任何带链接的公告帖都会判成技术帖。
+        assertTrue(SiemensCheckInTask.technicalAnchors(
+                "见 https://www.ad.siemens.com.cn/abc.html 页面").isEmpty());
+        // 真正的型号仍然能提取出来。
+        assertFalse(SiemensCheckInTask.technicalAnchors(
+                "见 https://www.ad.siemens.com.cn/abc.html 的 S7-1500 说明").isEmpty());
+    }
+
+    @Test
+    public void noTargetSkipDoesNotTripTheFailureBreaker() throws Exception {
+        // 挑不到技术帖属于「没有合适目标」，绝不能计入连续失败，
+        // 否则一项跳过就会把后面本来能做的任务全部熔断。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        java.lang.reflect.Field failedField = SiemensCheckInTask.class.getDeclaredField("lastTaskFailed");
+        failedField.setAccessible(true);
+        java.lang.reflect.Field noTargetField = SiemensCheckInTask.class.getDeclaredField("lastTaskNoTarget");
+        noTargetField.setAccessible(true);
+        java.lang.reflect.Field skippedField = SiemensCheckInTask.class.getDeclaredField("lastTaskSkipped");
+        skippedField.setAccessible(true);
+
+        task.markTaskNoTarget();
+        assertEquals(false, failedField.get(task));
+        assertEquals(true, noTargetField.get(task));
+        assertEquals(false, skippedField.get(task));
+
+        // 额度受限是另一套语义，不能被混成「无目标」。
+        SiemensCheckInTask other = new SiemensCheckInTask(environment(), baseUrl);
+        other.markTaskSkipped();
+        assertEquals(false, noTargetField.get(other));
+        assertEquals(true, skippedField.get(other));
+    }
+
+    @Test
+    public void reportsNoTargetSeparatelyFromQuotaLimit() throws Exception {
+        // 通知里两种跳过要说清，不能都写成「受每日主贴上限限制」。
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        java.lang.reflect.Field noTargetField = SiemensCheckInTask.class.getDeclaredField("noTargetTasks");
+        noTargetField.setAccessible(true);
+        java.util.Set<String> noTarget = (java.util.Set<String>) noTargetField.get(task);
+        noTarget.add(SiemensCheckInTask.TASK_REPLY_POST);
+
+        java.lang.reflect.Method notes = SiemensCheckInTask.class.getDeclaredMethod("skipNotes");
+        notes.setAccessible(true);
+        String text = (String) notes.invoke(task);
+        assertTrue("应说明没有合适目标，实际：" + text, text.contains("没有合适的目标"));
+        assertFalse("不能误报额度受限，实际：" + text, text.contains("主贴上限"));
+        assertTrue("应点名是哪一项，实际：" + text, text.contains("论坛回帖"));
+    }
+
+    @Test
     public void fallsBackToBuiltInContentWhenAiUnavailable() {
         Map<String, String> environment = environment();
         SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);

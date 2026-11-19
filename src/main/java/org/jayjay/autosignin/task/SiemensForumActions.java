@@ -48,6 +48,47 @@ final class SiemensForumActions {
     /** 收藏帖子时最多往前看几条，避免最新帖已收藏时无解。 */
     private static final int FAVORITE_CANDIDATES = 6;
     /**
+     * 回帖、评论时最多往前看几条帖子。
+     * 最新列表里常混着谈天说地、活动报名这类非技术帖，要往后找主题明确的技术帖。
+     */
+    private static final int TOPIC_CANDIDATES = 6;
+    /** 最多检查几篇帖子的主题。每篇都要抓一次详情页，不宜无限往后翻。 */
+    private static final int TOPIC_CHECK_LIMIT = 4;
+    /** 型号、报警码这类「字母+数字」组合，例如 S7-1500、ET200SP、F07452、6ES7。 */
+    private static final Pattern TECHNICAL_CODE = Pattern.compile("[A-Za-z]{1,6}[A-Za-z0-9\\-]*\\d[A-Za-z0-9\\-]*");
+    /**
+     * 技术主题线索词。只用来判断一条帖子值不值得回，命中任意一个就算技术帖。
+     * <p>
+     * 词表刻意收窄：像「模块」「参数」「故障」「电机」这种在活动帖、二手交易帖、
+     * 闲聊帖里也会出现的泛词一律不放，否则「国内直流电机厂商销售情况」这种商业帖
+     * 也会被当成技术帖。宁可漏判（跳过当天任务），也不要判错。
+     * <p>
+     * 需要收紧或放宽时只改这里，{@link #isTechnicalText(String)} 不含其它硬编码判断。
+     */
+    private static final String[] TECHNICAL_KEYWORDS = {
+            // 产品与型号系列
+            "plc", "profinet", "profibus", "ethernet", "et200", "simatic", "wincc", "博途", "tia portal",
+            "s7-1200", "s7-1500", "s7-300", "s7-400", "s7-200", "1500plc", "1200plc",
+            "s120", "g120", "v90", "v20", "g130", "g150", "6es7", "6gk7", "6se7",
+            // 组态与编程
+            "组态", "梯形图", "功能块", "程序块", "扫描周期", "数据块", "db块", "db 块", "ob1",
+            "中断ob", "中断 ob", "符号表", "在线监控", "下载程序", "固件升级",
+            // 编程语言与数据区（这些是纯技术术语，不会出现在活动帖里）
+            "l 区", "l区", "m 区", "m区", "背景db", "临时变量", "全局变量", "数据类型",
+            "fb块", "fc块", "ob块", "背景db", "背景 db", "sfc", "stl", "scl", "lad", "fbd",
+            // 通讯与网络
+            "通讯", "通信", "网段", "交换机", "网关", "报文", "opc ua", "modbus",
+            "设备名", "从站", "主站", "掉站", "看门狗", "更新时间", "冗余", "环网", "mrp",
+            // 诊断与故障（必须带具体技术对象，单用「故障」「报警」太泛）
+            "诊断缓冲区", "报警代码", "故障代码", "报错代码", "停机", "过流", "过载", "超时",
+            // 驱动与运动控制
+            "变频器", "伺服", "编码器", "运动控制", "回零", "定位控制", "直流母线", "预充电",
+            // 模拟量与信号
+            "模拟量", "数字量", "热电阻", "pt100", "热电偶", "4-20ma", "4~20ma", "io 模块",
+            // 上位与显示
+            "hmi", "触摸屏", "pid 控制", "pid调节", "pid 调节",
+    };
+    /**
      * 探讨帖的子分类（帖子类型）。S7-1500 版区要求必须选一个，不传会被拒「请选择帖子类别」。
      * 85 是「通信」。
      */
@@ -155,91 +196,86 @@ final class SiemensForumActions {
         return result;
     }
 
-    /** 在最新帖子里回帖。跳过自己的帖子，站点禁止自问自答。 */
+    /**
+     * 在最新帖子里回帖。跳过自己的帖子，站点禁止自问自答。
+     * <p>
+     * 候选按**帖子主题**挑：先取到详情页，只有主题明确的技术帖才参与，
+     * 谈天说地、活动报名这类没有技术主题的帖子直接排除——
+     * 对着这类帖子写出来的回帖必然答非所问。
+     */
     void replyPost() {
         String uid = task.currentUserId();
-        List<String> others = new ArrayList<>();
-        for (String candidate : latestForumPostIds(FAVORITE_CANDIDATES)) {
-            if (!candidate.startsWith(uid + "-")) {
-                others.add(candidate);
-            }
-        }
-        String postId = others.isEmpty() ? latestForumPostId()
-                : others.get(task.accountIndex() % others.size());
-        if (StrUtil.isBlank(postId)) {
+        Topic post = pickTechnicalTopic(uid);
+        if (post == null) {
+            // 没有可回的技术帖不是失败：计入失败会触发熔断，把后面能做的任务一起中止。
+            System.out.println("[西门子] 没有找到主题明确的技术帖，跳过回帖");
+            task.markTaskNoTarget();
             return;
         }
-        int split = postId.indexOf('-');
-        String articleId = split > 0 ? postId.substring(0, split) : postId;
-        String boardId = split > 0 ? postId.substring(split + 1) : BOARD_ID;
-        String[] topic = postTopic(articleId, boardId);
-        String content;
-        String title;
-        if (topic == null) {
-            System.out.println("[西门子] 拿不到原帖内容，回帖改用内置文案：" + articleId);
-            content = task.fallbackContent("reply");
-            title = "回复：升级选型讨论";
-        } else {
-            content = task.generateUnique("请用中文写一段西门子技术论坛的回帖，回复的原帖标题是："
-                    + topic[0] + "。原帖内容：" + topic[1]
-                    + "。回帖要贴着原帖的话题接话，150字以内，口语，不要分点。", "reply");
-            title = StrUtil.isBlank(topic[0]) ? "回复：技术讨论" : "回复：" + topic[0];
-        }
+        String source = post.title + " " + post.body;
+        String content = task.generateRelated("请用中文写一段西门子技术论坛的回帖，作为同行接着这个帖子往下聊。"
+                + "帖子标题：" + post.title + "。帖子正文：" + post.body + "。"
+                + "要求：紧扣这个帖子讨论的具体对象和问题，先复述你针对的是哪一点（例如某个型号、某个报警、"
+                + "某一步操作），再给出自己的经验、判断或补充做法；"
+                + "150字以内，口语，不要分点，不要复述标题，不要写和这个帖子无关的通用建议。",
+                "reply", source);
         if (StrUtil.isBlank(content)) {
+            System.out.println("[西门子] 回帖内容生成失败，跳过：" + post.articleId);
             return;
         }
-        submitPost(articleId, boardId, TYPE_DISCUSS, SiemensCheckInTask.cleanTitle(title), content, "0");
+        String title = StrUtil.isBlank(post.title) ? "回复：技术讨论" : "回复：" + post.title;
+        submitPost(post.articleId, post.boardId, TYPE_DISCUSS,
+                SiemensCheckInTask.cleanTitle(title), content, "0");
     }
 
-    /** 评论帖子。跳过自己和已经评论过的帖子，否则站点直接回 false。 */
+    /**
+     * 评论帖子。跳过自己和已经评论过的帖子，否则站点直接回 false。
+     * 和回帖一样，只评论主题明确的技术帖：详情页已经在抓，顺手把标题和正文取出来判主题，
+     * 不额外增加请求。
+     */
     void commentPost() {
         String uid = task.currentUserId();
-        List<String> open = new ArrayList<>();
-        for (String candidate : latestForumPostIds(FAVORITE_CANDIDATES)) {
+        List<Topic> open = new ArrayList<>();
+        for (String candidate : latestForumPostIds(TOPIC_CANDIDATES)) {
             if (candidate.startsWith(uid + "-")) {
                 continue;
             }
             int split = candidate.indexOf('-');
             String articleId = candidate.substring(0, split);
             String boardId = candidate.substring(split + 1);
-            SiemensCheckInTask.Page post = task.follow(task.supportBaseUrl()
-                    + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
-            if (post == null) {
+            Topic topic = topicOf(articleId, boardId);
+            if (topic == null || !isTechnicalTopic(topic)) {
                 continue;
             }
-            Matcher author = Pattern.compile("user_disp\\.aspx\\?u_id=(\\d+)").matcher(post.body);
+            Matcher author = Pattern.compile("user_disp\\.aspx\\?u_id=(\\d+)").matcher(topic.html);
             String authorId = author.find() ? author.group(1) : "";
-            long mine = Pattern.compile("u_id=\"" + uid + "\"").matcher(post.body).results().count();
+            long mine = Pattern.compile("u_id=\"" + uid + "\"").matcher(topic.html).results().count();
             // 别人的帖子、且我在页面上只出现 1 次（说明还没评论过）。
             if (!authorId.equals(uid) && mine <= 1) {
-                open.add(candidate);
+                open.add(topic);
             }
         }
         if (open.isEmpty()) {
-            System.out.println("[西门子] 没有可评论的帖子");
+            // 同样不是失败：没有可评论的技术帖就跳过，不影响其它任务。
+            System.out.println("[西门子] 没有可评论的技术帖");
+            task.markTaskNoTarget();
             return;
         }
         // 按账号序号错开，多个容器不会都评论同一篇。
-        String postId = open.get(task.accountIndex() % open.size());
-        int split = postId.indexOf('-');
-        String articleId = postId.substring(0, split);
-        String boardId = postId.substring(split + 1);
-        String[] topic = postTopic(articleId, boardId);
-        String content;
-        if (topic == null) {
-            System.out.println("[西门子] 拿不到原帖内容，评论改用内置文案：" + articleId);
-            content = task.fallbackContent("postcomment");
-        } else {
-            content = task.generateUnique("请用中文写一条西门子技术论坛的短评论，针对的帖子标题是："
-                    + topic[0] + "。帖子内容：" + topic[1]
-                    + "。60字以内，一句到两句，回帖要贴合这个主题，口语，不要分点。", "postcomment");
-        }
+        Topic post = open.get(task.accountIndex() % open.size());
+        String source = post.title + " " + post.body;
+        String content = task.generateRelated("请用中文写一条西门子技术论坛的短评论。"
+                + "帖子标题：" + post.title + "。帖子正文：" + post.body + "。"
+                + "要求：针对这个帖子里提到的具体内容说一句自己的看法或补充，"
+                + "60字以内，一句到两句，口语，不要分点，不要写成和主题无关的客套话。",
+                "postcomment", source);
         if (StrUtil.isBlank(content)) {
+            System.out.println("[西门子] 评论内容生成失败，跳过：" + post.articleId);
             return;
         }
         String url = task.supportBaseUrl() + "/club/bbs/bbsGeneric.ashx?action=AddEvaluate"
-                + "&aid=" + articleId + "&bid=" + boardId
-                + "&author=" + authorOf(articleId, boardId) + "&content=" + SiemensCheckInTask.encode(content)
+                + "&aid=" + post.articleId + "&bid=" + post.boardId
+                + "&author=" + post.authorId + "&content=" + SiemensCheckInTask.encode(content)
                 + "&uid=" + task.currentUserId();
         task.waitBeforeSubmit(GROUP);
         SiemensCheckInTask.HttpResult result = task.post(url, "", task.supportHeaders(url));
@@ -394,7 +430,8 @@ final class SiemensForumActions {
     }
 
     /** 从「最新发帖」列表取一条帖子，返回 articleId-boardId。 */
-    private String latestForumPostId() {        SiemensCheckInTask.Page page = task.follow(task.supportBaseUrl() + "/club/bbs/bbs_latest.aspx");
+    private String latestForumPostId() {
+        SiemensCheckInTask.Page page = task.follow(task.supportBaseUrl() + "/club/bbs/bbs_latest.aspx");
         if (page == null) {
             return null;
         }
@@ -550,29 +587,18 @@ final class SiemensForumActions {
         }
     }
 
-    private String authorOf(String articleId, String boardId) {
-        SiemensCheckInTask.Page page = task.follow(
-                task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
-        if (page == null) {
-            return "";
-        }
-        Matcher matcher = Pattern.compile("user_disp\\.aspx\\?u_id=(\\d+)").matcher(page.body);
-        return matcher.find() ? matcher.group(1) : "";
-    }
-
     /**
-     * 取原帖的标题和正文摘要，供回帖和评论时贴合主题。
-     * 详情页标题在 &lt;title&gt;（「标题-技术论坛-…」），正文在 div.articlecontent；
-     * 取不到时返回 null，调用方改用内置文案，避免把空主题喂给模型。
-     * 返回 {标题, 正文摘要}，任一段可能是空串。
+     * 抓一篇帖子的详情，取标题、正文摘要、作者和原始 HTML。
+     * 一次请求同时满足「判主题」和「生成文案」两个用途，避免重复抓同一个页面。
      */
-    private String[] postTopic(String articleId, String boardId) {
+    private Topic topicOf(String articleId, String boardId) {
         SiemensCheckInTask.Page page = task.follow(
                 task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html");
         if (page == null) {
             return null;
         }
-        String title = SiemensCheckInTask.readableText(SiemensAnswerActions.firstElementText(page.body, "title"));
+        String title = SiemensCheckInTask.readableText(
+                SiemensAnswerActions.firstElementText(page.body, "title"));
         if (StrUtil.isNotBlank(title)) {
             // 页面标题带站名后缀，只留真正的帖子标题。
             int cut = title.indexOf("-技术论坛");
@@ -581,10 +607,128 @@ final class SiemensForumActions {
             }
         }
         String body = SiemensAnswerActions.firstElementText(page.body, "div.articlecontent");
-        String summary = StrUtil.isBlank(body) ? "" : SiemensAnswerActions.plainText(body, 200);
+        String summary = StrUtil.isBlank(body) ? "" : SiemensAnswerActions.plainText(body, 600);
+        Matcher author = Pattern.compile("user_disp\\.aspx\\?u_id=(\\d+)").matcher(page.body);
+        String authorId = author.find() ? author.group(1) : "";
         if (StrUtil.isBlank(title) && StrUtil.isBlank(summary)) {
             return null;
         }
-        return new String[]{StrUtil.blankToDefault(title, ""), summary};
+        return new Topic(articleId, boardId, StrUtil.blankToDefault(title, ""), summary,
+                authorId, page.body);
+    }
+
+    /**
+     * 按帖子主题挑一条可回帖的技术帖：跳过自己的帖子和没有技术主题的帖子，
+     * 按账号序号错开，避免多个容器操作同一篇。
+     */
+    private Topic pickTechnicalTopic(String uid) {
+        List<Topic> technical = new ArrayList<>();
+        int checked = 0;
+        for (String candidate : latestForumPostIds(TOPIC_CANDIDATES)) {
+            // 限制的是「检查了几篇」而不是「找到了几篇」：每篇都要抓详情页，
+            // 用已找到数当条件会让全是非技术帖时翻完整个候选列表。
+            if (checked >= TOPIC_CHECK_LIMIT) {
+                break;
+            }
+            int split = candidate.indexOf('-');
+            String articleId = candidate.substring(0, split);
+            String boardId = candidate.substring(split + 1);
+            checked++;
+            Topic topic = topicOf(articleId, boardId);
+            if (topic == null || uid.equals(topic.authorId) || !isTechnicalTopic(topic)) {
+                continue;
+            }
+            technical.add(topic);
+        }
+        if (technical.isEmpty()) {
+            return null;
+        }
+        return technical.get(task.accountIndex() % technical.size());
+    }
+
+    /**
+     * 帖子是否是一个有明确技术主题的帖。
+     * <p>
+     * 站点「最新发帖」混着谈天说地、活动报名、版务公告，这类帖没有可讨论的技术内容，
+     * 对着它们生成的回帖必然是套话。判据是标题或正文里出现西门子产品型号、
+     * 技术缩写或常见故障/组态用语——技术帖几乎必然命中，生活帖基本不会。
+     */
+    static boolean isTechnicalTopic(Topic topic) {
+        if (topic == null) {
+            return false;
+        }
+        // 活动/公告类标记优先：这类帖正文常提到产品名，但主题不是技术问题。
+        if (isNonTechnicalPost(topic)) {
+            return false;
+        }
+        return isTechnicalText(topic.title) || isTechnicalText(topic.body);
+    }
+
+    /**
+     * 是不是活动、公告、交易类帖子。
+     * 只看标题：正文里出现「报名」「领取」等词很常见，用正文判会误杀正常技术帖。
+     */
+    static boolean isNonTechnicalPost(Topic topic) {
+        if (topic == null || StrUtil.isBlank(topic.title)) {
+            return false;
+        }
+        String title = topic.title;
+        for (String marker : NON_TECHNICAL_MARKERS) {
+            if (title.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 文本里是否含技术线索。标题权重更高，但两者用同一套词表和规则。 */
+    static boolean isTechnicalText(String text) {
+        if (StrUtil.isBlank(text)) {
+            return false;
+        }
+        String lower = text.toLowerCase();
+        for (String keyword : TECHNICAL_KEYWORDS) {
+            if (lower.contains(keyword)) {
+                return true;
+            }
+        }
+        // 型号、报警码这类拉丁字母+数字的组合（S7-1500、ET200SP、F07452）也算技术线索。
+        Matcher matcher = TECHNICAL_CODE.matcher(text);
+        while (matcher.find()) {
+            if (matcher.group().length() >= 3) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 活动、公告类标题标记。这类帖正文里常提到产品名，会被关键词命中，
+     * 但主题是活动/公告而不是技术问题，回帖只会变成凑数。
+     * 命中这里直接判成非技术帖，优先级高于关键词。
+     */
+    private static final String[] NON_TECHNICAL_MARKERS = {
+            "一路上有你", "限量纪念", "周年专场", "报名", "活动", "领取", "抽奖",
+            "免费领", "促销", "优惠", "团购", "二手", "转让", "招聘", "求职", "版规", "公告",
+            "签到实物", "兑换", "积分",
+    };
+
+    /** 一篇帖子在生成文案时需要的信息，避免多处重复抓取同一个详情页。 */
+    static final class Topic {
+        final String articleId;
+        final String boardId;
+        final String title;
+        final String body;
+        final String authorId;
+        final String html;
+
+        Topic(String articleId, String boardId, String title, String body, String authorId, String html) {
+            this.articleId = articleId;
+            this.boardId = boardId;
+            this.title = title;
+            this.body = body;
+            this.authorId = authorId;
+            this.html = html;
+        }
     }
 }

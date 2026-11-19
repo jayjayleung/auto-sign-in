@@ -173,7 +173,7 @@ final class SiemensPipeline {
         for (int i = 0; i < answers.size(); i++) {
             JSONObject item = answers.getJSONObject(i);
             if (item != null && aid.equals(item.getStr("A_ID"))) {
-                return SiemensAnswerActions.plainText(item.getStr("A_Content"), 200);
+                return SiemensAnswerActions.plainText(item.getStr("A_Content"), 600);
             }
         }
         return "";

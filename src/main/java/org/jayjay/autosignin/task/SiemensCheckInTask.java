@@ -72,6 +72,21 @@ public class SiemensCheckInTask extends CheckInTask {
     private static final int MAX_CONSECUTIVE_FAILURES = 2;
     /** 相似度超过这个值就判为雷同并重写。收紧到 0.6，减少回帖和评论跨天重复。 */
     private static final double DUPLICATE_THRESHOLD = 0.6;
+    /**
+     * 回帖、评论、回答与原文的最低重合度。
+     * 只用来拦「明显跑题」的通用套话，阈值取很低，正常贴合主题的内容远高于它。
+     */
+    private static final double RELATED_THRESHOLD = 0.06;
+    /** 技术锚点：拉丁字母/数字组成的词，如 S7-1500、ET200SP、PROFINET、F07452、P0730。 */
+    private static final Pattern ANCHOR_PATTERN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9\\-\\+]*");
+    /**
+     * URL 及其片段。原帖正文里常带官网链接，其中的 https/www/siemens 会被当成技术锚点，
+     * 让「官网更新网址了」这类公告帖通过相关性校验，因此要先整段剔除。
+     */
+    private static final Pattern URL_PATTERN = Pattern.compile(
+            "(?i)\\b(?:https?|ftp)://\\S+|\\bwww\\.[\\w.\\-]+\\S*|\\b[\\w.\\-]+\\.(?:com|cn|net|org)(?:\\.cn)?\\b\\S*");
+    /** 锚点里的数字段，用来兼容「S7-1500」与「1500」这种简写。 */
+    private static final Pattern DIGIT_GROUP = Pattern.compile("\\d+");
 
     private static final Pattern FID_PATTERN = Pattern.compile("fId\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern APP_ID_PATTERN = Pattern.compile("idaasAppId\\s*:\\s*\"([^\"]+)\"");
@@ -145,34 +160,11 @@ public class SiemensCheckInTask extends CheckInTask {
                     + "但同一台变频器用面板看是正常的。报文是标准报文，组态也核对过。"
                     + "想请教下一般是什么原因？",
     };
-    private static final String[] REPLIES = {
-            "我们厂去年也做过类似的改造，经验是先把 DP 从站保留，用 CM 1542-5 过渡，"
-                    + "按工位分批换，别整线一次停。程序和画面分两次下装，出问题好回退。",
-            "补充一条：换型时把原来的符号表和注释一起整理好，后面接手的人能省很多时间。"
-                    + "备件也要提前确认交期，老模块现在越来越难买。",
-            "选型上建议先算一下 IO 点数的增长余量，别只按现在的需求配。"
-                    + "我们当时就是点数不够又补了一块模块，柜内空间差点放不下。",
-    };
-    private static final String[] POST_COMMENTS = {
-            "这个思路挺实用的，现场调试时确实能少走弯路。",
-            "同意，先看物理层再查程序，能省一半时间。",
-            "感谢分享，正好最近在做类似的项目，参考价值很大。",
-    };
-    private static final String[] BEST_COMMENTS = {
-            "补充一点现场经验：同样的配置最好在样机上先跑一遍，把报警码记下来，现场再遇到能省不少时间。",
-            "按这个思路处理过一次，确实有效。另外建议把诊断缓冲区一起看，能更快定位到第一现场。",
-            "这个方法我们也用过，补充一条：改完组态记得重新下载硬件，否则诊断信息会对不上。",
-    };
-    private static final String[] ANSWERS = {
-            "建议先确认硬件组态和实际模块型号、固件版本是否一致，再检查 PROFINET 设备名是否分配正确。"
-                    + "如果在线诊断能看到设备但通讯不上，先看是否在同一个网段、是否有 IP 冲突，"
-                    + "再逐台核对拓扑和端口设置，一般就能定位到问题点。",
-            "这种情况一般先看三层：物理层（网线、屏蔽、走线是否和动力线分开）、"
-                    + "设备名和 IP 分配（有没有重名或残留）、以及更新时间设置是否过短。"
-                    + "顺序建议从物理层开始，排查起来最快。",
-            "可以在 TIA 的在线访问里用「分配设备名」的功能批量处理，比逐个点开快很多。"
-                    + "前提是拓扑视图和实物接线一致，组态下载后再统一分配一次，基本能一次过。",
-    };
+    /*
+     * 回帖、评论、回答必须贴合原帖，所以这几类没有通用兜底文案：
+     * 拿不到原帖内容或生成结果偏离主题时直接跳过本次任务，宁可当天少做一项，
+     * 也不往别人的帖子下面塞一段和主题无关的话。
+     */
 
     /** 每日任务的稳定代码，站点改中文名或增删任务时这里才需要跟着改。 */
     static final String TASK_SIGN_IN = "NewMySupport_SignIn";
@@ -207,10 +199,17 @@ public class SiemensCheckInTask extends CheckInTask {
     private boolean lastTaskFailed;
     /** 本次任务被站点额度挡住，既不算成功也不算失败。 */
     private boolean lastTaskSkipped;
+    /**
+     * 本次任务没有合适的目标而主动跳过（例如最新帖里没有技术主题的帖子可回）。
+     * 这与失败、额度受限都不同：不计入连续失败，也不会中止剩余任务。
+     */
+    private boolean lastTaskNoTarget;
     /** 本次运行是否按配置主动跳过了故事帖。 */
     private boolean storySkipped;
     /** 被额度挡下的任务，通知里单独说明，避免误报成「已提交待审核」。 */
     private final Set<String> quotaLimited = new HashSet<>();
+    /** 因为没有合适目标而跳过的任务，通知里单独说明，避免误报成失败。 */
+    private final Set<String> noTargetTasks = new HashSet<>();
     /** 本次运行已经处理过的任务代码。 */
     private final Set<String> handled = new HashSet<>();
     /** 预制内容库，懒加载。 */
@@ -548,6 +547,7 @@ public class SiemensCheckInTask extends CheckInTask {
         for (String code : pending) {
             lastTaskFailed = false;
             lastTaskSkipped = false;
+            lastTaskNoTarget = false;
             try {
                 // 按任务代码分发，中文名和排序随时会被站点调整。
                 if (TASK_COLLECT_QUESTION.equals(code)) {
@@ -597,6 +597,11 @@ public class SiemensCheckInTask extends CheckInTask {
                     // 按配置关闭的故事帖不算额度受限，否则通知会误报「明天会重试」。
                     quotaLimited.add(code);
                 }
+            } else if (lastTaskNoTarget) {
+                // 没有合适的目标不是失败，绝不能计入连续失败，
+                // 否则一项挑不到目标就会把后面本来能做的任务全部熔断掉。
+                consecutiveFailures = 0;
+                noTargetTasks.add(code);
             } else {
                 consecutiveFailures = 0;
                 handled.add(code);
@@ -639,18 +644,33 @@ public class SiemensCheckInTask extends CheckInTask {
             if (!handled.isEmpty()) {
                 text = text + "（本次处理了 " + handled.size() + " 项）";
             }
-            if (!quotaLimited.isEmpty()) {
-                text = text + "（受站点每日主贴上限限制，明天会重试）";
-            }
+            text = text + skipNotes();
             addMessage("每日任务：", text);
             return;
         }
         String text = remainingText(pendingDailyTasks(tasks),
                 handled.contains(TASK_PUBLISH_STORY), aborted, storySkipped);
-        if (!quotaLimited.isEmpty()) {
-            text = text + "（受站点每日主贴上限限制，明天会重试）";
-        }
+        text = text + skipNotes();
         addMessage("每日任务：", text);
+    }
+
+    /**
+     * 把「跳过但没做成」的两类原因拼成通知后缀。
+     * 额度受限和无合适目标是两回事，混成一句话会让人以为明天一定重试。
+     */
+    private String skipNotes() {
+        StringBuilder notes = new StringBuilder();
+        if (!quotaLimited.isEmpty()) {
+            notes.append("（受站点每日主贴上限限制，明天会重试）");
+        }
+        if (!noTargetTasks.isEmpty()) {
+            List<String> names = new ArrayList<>();
+            for (String code : noTargetTasks) {
+                names.add(taskDisplayName(code));
+            }
+            notes.append("（").append(String.join("、", names)).append("今天没有合适的目标，已跳过）");
+        }
+        return notes.toString();
     }
 
     /**
@@ -908,6 +928,20 @@ public class SiemensCheckInTask extends CheckInTask {
         return lastTaskSkipped;
     }
 
+    /**
+     * 标记本次任务因「没有合适的目标」而跳过，例如最新帖里没有技术主题的帖子可回。
+     * 这既不是失败也不是额度受限：不计入连续失败，也不会中止后续任务，
+     * 只在通知里说明「今天没有合适的目标」。
+     */
+    void markTaskNoTarget() {
+        lastTaskNoTarget = true;
+    }
+
+    /** 本次任务是否因为找不到合适目标而跳过。 */
+    boolean wasTaskNoTarget() {
+        return lastTaskNoTarget;
+    }
+
     // ==================== 签到与抽奖 ====================
 
     private JSONObject readSignDetail() {
@@ -1032,8 +1066,158 @@ public class SiemensCheckInTask extends CheckInTask {
     }
 
     /**
+     * 生成必须贴合原帖的内容（回帖、评论、回答）。
+     * <p>
+     * 与 {@link #generateUnique} 的区别是**没有兜底**：拿不到原帖内容、AI 不可用、
+     * 或者生成结果和原文对不上时返回 null，由调用方跳过本次任务。
+     * 之前这类动作在 AI 失败时会退回通用文案，顶着「回复：xxx」的标题发一段
+     * 和原帖毫无关系的话，比少做一项任务糟糕得多。
+     *
+     * @param source 原帖/原答案的标题与正文，必须非空
+     * @param prompt 已包含原文的完整提示词
+     * @return 生成内容；不可用时返回 null
+     */
+    String generateRelated(String prompt, String kind, String source) {
+        if (StrUtil.isBlank(source)) {
+            System.out.println("[西门子] " + kind + " 缺少原文，跳过本次任务");
+            return null;
+        }
+        String previous = loadLastContent(kind);
+        String content = null;
+        try {
+            content = generateWithAi(prompt, previous);
+        } catch (RuntimeException e) {
+            System.out.println("[西门子] AI 生成异常：" + e.getMessage() + "，跳过本次 " + kind);
+            aiUnavailable = true;
+        }
+        if (StrUtil.isBlank(content)) {
+            // 这里刻意不取 fallbackContent：通用文案和原帖无关，不能发出去。
+            System.out.println("[西门子] " + kind + " 没有可用内容，跳过本次任务");
+            lastTaskFailed = true;
+            return null;
+        }
+        if (!mentionsSource(content, source)) {
+            System.out.println("[西门子] " + kind + " 内容与原帖关联太弱，重写一次");
+            String retry = generateWithAi(prompt + "\n（必须紧扣原文里提到的具体对象、现象或步骤，"
+                    + "不要写成泛泛而谈的通用建议。）", previous);
+            if (StrUtil.isNotBlank(retry) && mentionsSource(retry, source)) {
+                content = retry;
+            } else {
+                System.out.println("[西门子] " + kind + " 重写后仍与原帖脱节，跳过本次任务");
+                lastTaskFailed = true;
+                return null;
+            }
+        }
+        if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD) {
+            System.out.println("[西门子] " + kind + "内容与上次过于接近，重写一次");
+            String retry = generateWithAi(prompt + "\n（务必换一个完全不同的开头和例子。）", previous);
+            // 重写后必须再过一次相关性校验：去重那次可能改出一个跑题的内容。
+            if (StrUtil.isNotBlank(retry) && mentionsSource(retry, source)) {
+                content = retry;
+            } else if (StrUtil.isNotBlank(retry)) {
+                System.out.println("[西门子] " + kind + " 去重重写后与原帖脱节，保留原内容");
+            }
+        }
+        rememberContent(kind, content);
+        return content;
+    }
+
+    /**
+     * 判断生成内容是否真的在讲原文那件事。
+     * <p>
+     * 两级判据，宁可放过也不误杀：
+     * <ol>
+     * <li>原文里带型号、报警码、参数名这类**技术锚点**（S7-1500、V90、ET200SP、F07452、
+     * PROFINET 等）时，只要求生成内容命中其中任意一个。回帖和回答几乎必然会引用，
+     * 而一段跑题的通用建议不会出现这些词。</li>
+     * <li>原文是纯口语描述、提不出锚点时，退回字符二元组重合度，且阈值取很低。</li>
+     * </ol>
+     */
+    static boolean mentionsSource(String content, String source) {
+        if (StrUtil.isBlank(content) || StrUtil.isBlank(source)) {
+            return false;
+        }
+        if (sharesTechnicalAnchor(content, source)) {
+            return true;
+        }
+        Set<String> sourcePairs = bigrams(source);
+        Set<String> contentPairs = bigrams(content);
+        if (sourcePairs.isEmpty() || contentPairs.isEmpty()) {
+            return false;
+        }
+        int hit = 0;
+        for (String pair : contentPairs) {
+            if (sourcePairs.contains(pair)) {
+                hit++;
+            }
+        }
+        return (double) hit / contentPairs.size() >= RELATED_THRESHOLD;
+    }
+
+    /** 生成内容里是否出现了原文提到的型号、报警码等技术词，命中任意一个就算相关。 */
+    static boolean sharesTechnicalAnchor(String content, String source) {
+        List<String> anchors = technicalAnchors(source);
+        if (anchors.isEmpty()) {
+            return false;
+        }
+        String lower = content.toLowerCase();
+        for (String anchor : anchors) {
+            if (lower.contains(anchor.toLowerCase())) {
+                return true;
+            }
+        }
+        // 「S7-1500」在原文里，回复只写「1500」也算命中，按型号尾部的数字再比一次。
+        for (String anchor : anchors) {
+            Matcher digits = DIGIT_GROUP.matcher(anchor);
+            while (digits.find()) {
+                if (digits.group().length() >= 3 && lower.contains(digits.group())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 从原文里提取技术锚点：型号、报警码、参数名、英文缩写。
+     * 纯中文的叙述提不出锚点，由二元组判据兜底。
+     */
+    static List<String> technicalAnchors(String text) {
+        List<String> anchors = new ArrayList<>();
+        if (StrUtil.isBlank(text)) {
+            return anchors;
+        }
+        // 先把 URL 整段剔掉，否则链接里的 https/www/siemens 会被当成技术线索。
+        Matcher matcher = ANCHOR_PATTERN.matcher(URL_PATTERN.matcher(text).replaceAll(" "));
+        while (matcher.find()) {
+            String token = matcher.group();
+            // 必须带英文字母：纯数字（数量、年份）区分度太低，会把无关内容误判成相关。
+            if (token.length() < 3 || !token.matches(".*[A-Za-z].*")) {
+                continue;
+            }
+            if (!anchors.contains(token)) {
+                anchors.add(token);
+            }
+        }
+        return anchors;
+    }
+
+    private static Set<String> bigrams(String text) {
+        String cleaned = text.replaceAll("[\\s\\p{Punct}，。！？、；：“”（）【】《》]", "");
+        Set<String> pairs = new HashSet<>();
+        for (int i = 0; i + 2 <= cleaned.length(); i++) {
+            pairs.add(cleaned.substring(i, i + 2));
+        }
+        return pairs;
+    }
+
+    /**
      * 内置兜底文案，只在 AI 助手不可用时使用。
      * 用「当天序号 + 账号哈希 + 第几次取用」选条目，避免多个账号同一天发出同样的内容。
+     * <p>
+     * 只覆盖「自己发起」的内容（发帖、故事帖、提问）：这些没有原帖可参照，
+     * 通用文案最多是平淡，不会答非所问。回帖、评论、回答三类必须贴着原帖写，
+     * 一律走 {@link #generateRelated}，这里不提供兜底。
      */
     String fallbackContent(String kind) {
         if (kind == null) {
@@ -1052,14 +1236,6 @@ public class SiemensCheckInTask extends CheckInTask {
                 return pick(ASK_TITLES, kind);
             case "askbody":
                 return pick(ASK_BODIES, kind);
-            case "reply":
-                return pick(REPLIES, kind);
-            case "postcomment":
-                return pick(POST_COMMENTS, kind);
-            case "bestcomment":
-                return pick(BEST_COMMENTS, kind);
-            case "answer":
-                return pick(ANSWERS, kind);
             default:
                 return null;
         }
