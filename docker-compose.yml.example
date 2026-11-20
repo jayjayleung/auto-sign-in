@@ -32,7 +32,7 @@ services:
 #      - ./state/shared:/app/shared
 #    environment:
 #      - TZ=Asia/Shanghai
-#      - CRON_SCHEDULE=13 9 * * *
+#      - CRON_SCHEDULE=21 9 * * *
 #      - RUN_ON_STARTUP=false
 #    logging:
 #      driver: json-file

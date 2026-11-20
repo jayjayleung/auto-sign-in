@@ -50,6 +50,11 @@ final class ContentBank {
     private static final int MAX_BATCHES = 6;
     /** 单批生成超时。推理模型较慢，给足余量但要能在 cron 任务里跑完。 */
     private static final int GENERATE_TIMEOUT_MILLIS = 240_000;
+    /**
+     * 主模型失败后备用模型的单次超时。
+     * 备用模型本来就是拿来抢时间的，不必再给满 4 分钟，否则一次补库就会吃掉大半预算。
+     */
+    private static final int FALLBACK_TIMEOUT_MILLIS = 90_000;
     /** 整轮运行里补库的总时长上限，三个库共享这一份预算。 */
     static final long REFILL_BUDGET_MILLIS = 10 * 60_000L;
 
@@ -117,6 +122,11 @@ final class ContentBank {
             System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，无需补充");
             return;
         }
+        if (task != null && task.aiExhausted()) {
+            // 文案接口本轮已经熔断，再补货只会重复等超时；用现有库存和兜底文案继续。
+            System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，文案接口不可用，跳过补充");
+            return;
+        }
         int target = ready == 0 ? FIRST_FILL : TARGET_SIZE;
         int needed = target - ready;
         System.out.println("[西门子] " + kind + " 内容库剩余 " + ready + " 条，补充到 "
@@ -130,7 +140,7 @@ final class ContentBank {
                 break;
             }
             int size = Math.min(BATCH_SIZE, needed - added);
-            List<String[]> generated = generate(kind, size);
+            List<String[]> generated = generate(kind, size, deadline);
             if (generated.isEmpty()) {
                 failures++;
                 System.out.println("[西门子] " + kind + " 第 " + (batch + 1) + " 批生成失败");
@@ -210,13 +220,24 @@ final class ContentBank {
 
     /** 调外部 AI 生成 count 条内容，返回 {title, body} 列表；失败返回空列表。 */
     private List<String[]> generate(String kind, int count) {
-        List<String[]> result = new ArrayList<>();
+        // 没有外部截止时间时（库空现场应急生成）给主备两次机会，各自按单批超时封顶。
+        return generate(kind, count, System.currentTimeMillis() + GENERATE_TIMEOUT_MILLIS * 2);
+    }
+
+    /**
+     * 调外部 AI 生成 count 条内容，整体不超过 deadline。
+     * <p>
+     * 补库有共享的总时长预算，这里必须按剩余时间压单次超时：否则主模型等满 240 秒再换备用模型，
+     * 一批就能吃掉 8 分钟，三个库串起来会把整轮定时任务拖过预期的运行窗口。
+     */
+    private List<String[]> generate(String kind, int count, long deadline) {
+        load();
         String baseUrl = env("AI_BASE_URL");
         String apiKey = env("AI_API_KEY");
         String model = env("AI_MODEL");
         if (StrUtil.isBlank(baseUrl) || StrUtil.isBlank(apiKey) || StrUtil.isBlank(model)) {
             System.out.println("[西门子] 未配置 AI_BASE_URL/AI_API_KEY/AI_MODEL，无法生成内容");
-            return result;
+            return new ArrayList<>();
         }
         String prompt = buildPrompt(kind, count);
         // 把已用过的标题喂给模型，避免库空时反复生成同一条。
@@ -224,6 +245,43 @@ final class ContentBank {
         if (StrUtil.isNotBlank(existing)) {
             prompt = prompt + "\n\n以下标题已经用过，绝对不要再出现相同或近似的：\n" + existing;
         }
+        int primaryTimeout = timeoutWithin(deadline, GENERATE_TIMEOUT_MILLIS);
+        if (primaryTimeout <= 0) {
+            return new ArrayList<>();
+        }
+        List<String[]> result = generateOnce(baseUrl, apiKey, model, prompt, primaryTimeout);
+        if (!result.isEmpty()) {
+            return result;
+        }
+        // 主模型超时或报错时换备用模型再试一次：三个容器早上同时补库，
+        // 主模型排队排在超时边缘时，更轻的备用模型往往能把这批内容补上。
+        // 备用模型给的时间短一些，避免一次补库把总预算吃光。
+        String fallback = env("AI_FALLBACK_MODEL");
+        if (StrUtil.isBlank(fallback) || fallback.equals(model)) {
+            return result;
+        }
+        int fallbackTimeout = timeoutWithin(deadline, FALLBACK_TIMEOUT_MILLIS);
+        if (fallbackTimeout <= 0) {
+            System.out.println("[西门子] 补库预算已用尽，不再用备用模型重试");
+            return result;
+        }
+        System.out.println("[西门子] 主模型生成失败，改用备用模型 " + fallback + " 重试");
+        return generateOnce(baseUrl, apiKey, fallback, prompt, fallbackTimeout);
+    }
+
+    /** 把单次超时压到不超过剩余预算，返回毫秒；剩余不足 1 秒时返回 0。 */
+    private static int timeoutWithin(long deadline, int limit) {
+        long remaining = deadline - System.currentTimeMillis();
+        if (remaining < 1000) {
+            return 0;
+        }
+        return (int) Math.min(limit, remaining);
+    }
+
+    /** 用指定模型请求一次，返回解析后的内容列表；任何失败都返回空列表。 */
+    private List<String[]> generateOnce(String baseUrl, String apiKey, String model, String prompt,
+                                        int timeoutMillis) {
+        List<String[]> result = new ArrayList<>();
         JSONObject payload = JSONUtil.createObj();
         payload.set("model", model);
         payload.set("messages", new JSONArray().put(JSONUtil.createObj()
@@ -237,9 +295,9 @@ final class ContentBank {
         String url = StrUtil.removeSuffix(baseUrl, "/") + "/chat/completions";
         try {
             HttpResponse response = HttpRequest.post(url).body(payload.toString())
-                    .headerMap(headers, true).timeout(GENERATE_TIMEOUT_MILLIS).execute();
+                    .headerMap(headers, true).timeout(timeoutMillis).execute();
             if (response.getStatus() != 200) {
-                System.out.println("[西门子] 生成内容 HTTP " + response.getStatus()
+                System.out.println("[西门子] 生成内容 HTTP " + response.getStatus() + "（" + model + "）"
                         + "：" + StrUtil.maxLength(response.body(), 200));
                 return result;
             }
@@ -255,7 +313,7 @@ final class ContentBank {
             }
             return parseItems(content);
         } catch (Exception e) {
-            System.out.println("[西门子] 生成内容异常：" + e.getMessage());
+            System.out.println("[西门子] 生成内容异常（" + model + "）：" + e.getMessage());
             return result;
         }
     }

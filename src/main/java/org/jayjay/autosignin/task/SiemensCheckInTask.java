@@ -61,8 +61,14 @@ public class SiemensCheckInTask extends CheckInTask {
     private static final String MALL_REFERER = "https://mall.siemens.com.cn/pcweb/xiyouAi?platform=3";
 
     private static final int TIMEOUT_MILLIS = 30000;
-    /** AI 生成比普通接口慢，单独放宽到 60 秒。 */
-    private static final int AI_TIMEOUT_MILLIS = 60000;
+    /**
+     * 单条文案生成的超时。
+     * <p>
+     * 实测单条 2-30 秒，但三个容器早上在同一分钟内起跑、同时打同一个本地网关时，
+     * 排队能把主模型推到 60 秒以上并整体超时。放宽到 100 秒，配合失败后换备用模型重试，
+     * 让「回帖、评论、回答」这类必须贴合原文的任务有机会做完，而不是一超时就整项跳过。
+     */
+    private static final int AI_TIMEOUT_MILLIS = 100_000;
     private static final int MAX_REDIRECTS = 10;
     /** 同类提交之间的最小间隔，站点规则要求提问/回答/评论间隔至少 2 分钟。 */
     private static final long MIN_INTERVAL_MILLIS = 120_000L;
@@ -70,6 +76,14 @@ public class SiemensCheckInTask extends CheckInTask {
     private static final String GROUP_ANSWER = "answer";
     /** 连续失败达到上限就停止后续任务，避免风控期间继续请求。 */
     private static final int MAX_CONSECUTIVE_FAILURES = 2;
+    /**
+     * 外部 AI 连续失败几次后本轮不再尝试。
+     * <p>
+     * 三个容器原先几乎同时起跑，同时打同一个文案网关，单次 60 秒的生成请求经常整体超时。
+     * 超时本身该由备用模型再救一次，但如果连备用模型都不通，就说明网关确实不可用，
+     * 继续每项任务都等满超时只会把整轮运行拖长，所以连续两次失败直接熔断。
+     */
+    private static final int AI_FAILURE_LIMIT = 2;
     /** 相似度超过这个值就判为雷同并重写。收紧到 0.6，减少回帖和评论跨天重复。 */
     private static final double DUPLICATE_THRESHOLD = 0.6;
     /**
@@ -193,6 +207,10 @@ public class SiemensCheckInTask extends CheckInTask {
      * 改用内置文案兜底，避免一次 AI 故障把整轮每日任务带崩。
      */
     private boolean aiUnavailable;
+    /** 外部文案接口连续失败几次，到 {@link #AI_FAILURE_LIMIT} 就熔断本轮。 */
+    private int aiFailures;
+    /** 本次运行是否已经因为文案接口连续失败而放弃，用来把日志和通知说清楚。 */
+    private boolean aiGaveUp;
     /** 兜底文案每种类型已经用过几次，用来在同一次运行内换着取，避免重复。 */
     private final Map<String, Integer> fallbackUses = new HashMap<>();
     private int consecutiveFailures;
@@ -1043,6 +1061,7 @@ public class SiemensCheckInTask extends CheckInTask {
             // AI 侧网络抖动或超时不该让整条任务失败，标记后直接用兜底文案。
             System.out.println("[西门子] AI 生成异常：" + e.getMessage() + "，改用内置文案");
             aiUnavailable = true;
+            noteAiFailure();
         }
         if (StrUtil.isBlank(content)) {
             content = fallbackContent(kind);
@@ -1054,7 +1073,8 @@ public class SiemensCheckInTask extends CheckInTask {
             rememberContent(kind, content);
             return content;
         }
-        if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD) {
+        if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD
+                && !aiExhausted()) {
             System.out.println("[西门子] " + kind + "内容与上次过于接近，重写一次");
             String retry = generateWithAi(prompt + "\n（务必换一个完全不同的开头和例子。）", previous);
             if (StrUtil.isNotBlank(retry)) {
@@ -1089,6 +1109,7 @@ public class SiemensCheckInTask extends CheckInTask {
         } catch (RuntimeException e) {
             System.out.println("[西门子] AI 生成异常：" + e.getMessage() + "，跳过本次 " + kind);
             aiUnavailable = true;
+            noteAiFailure();
         }
         if (StrUtil.isBlank(content)) {
             // 这里刻意不取 fallbackContent：通用文案和原帖无关，不能发出去。
@@ -1097,6 +1118,12 @@ public class SiemensCheckInTask extends CheckInTask {
             return null;
         }
         if (!mentionsSource(content, source)) {
+            // 重写也要先看熔断状态：接口已经放弃时再要一次只会白等一轮超时。
+            if (aiExhausted()) {
+                System.out.println("[西门子] 文案接口不可用，" + kind + " 不再重写，跳过本次任务");
+                lastTaskFailed = true;
+                return null;
+            }
             System.out.println("[西门子] " + kind + " 内容与原帖关联太弱，重写一次");
             String retry = generateWithAi(prompt + "\n（必须紧扣原文里提到的具体对象、现象或步骤，"
                     + "不要写成泛泛而谈的通用建议。）", previous);
@@ -1108,7 +1135,8 @@ public class SiemensCheckInTask extends CheckInTask {
                 return null;
             }
         }
-        if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD) {
+        if (StrUtil.isNotBlank(previous) && similarity(content, previous) > DUPLICATE_THRESHOLD
+                && !aiExhausted()) {
             System.out.println("[西门子] " + kind + "内容与上次过于接近，重写一次");
             String retry = generateWithAi(prompt + "\n（务必换一个完全不同的开头和例子。）", previous);
             // 重写后必须再过一次相关性校验：去重那次可能改出一个跑题的内容。
@@ -1259,36 +1287,103 @@ public class SiemensCheckInTask extends CheckInTask {
 
     /** 每次请求带上当天日期和随机角度，避免连续几天生成雷同内容。 */
     String generateWithAi(String prompt, String avoid) {
-        if (aiUnavailable) {
-            return null;
-        }
         String varied = prompt + "\n（今天是 " + LocalDate.now(SHANGHAI) + "，请换一个与以往不同的角度和说法"
                 + (StrUtil.isBlank(avoid) ? "。" : "，不要与下面这段雷同：" + avoid + "。");
         // 优先用外部 OpenAI 兼容接口：西门子商城 AI 对不少账号已要求二次验证，长期不可用。
-        String external = askExternalAi(varied);
+        // 熔断后跳过外部接口，直接走商城 AI 兜底，不再为死掉的网关反复等超时。
+        String external = aiGaveUp ? null : askExternalAiWithRetry(varied);
         if (StrUtil.isNotBlank(external)) {
+            aiFailures = 0;
             return external;
+        }
+        // 商城 AI 只是兜底，它登录失败过就别再试。这个标记只描述商城侧，
+        // 不能反过来挡住仍然可用的外部接口，否则一次兜底登录失败会让整轮任务全部放弃。
+        if (aiUnavailable) {
+            noteAiFailure();
+            return null;
         }
         String token = mallAccessToken();
         if (StrUtil.isBlank(token)) {
             aiUnavailable = true;
+            noteAiFailure();
             return null;
         }
         String answer = askAi(token, varied);
         if (StrUtil.isBlank(answer) && StrUtil.isNotBlank(avoid)) {
             answer = askAi(token, prompt + "\n（今天是 " + LocalDate.now(SHANGHAI) + "，换个说法重新写一遍。）");
         }
+        if (StrUtil.isBlank(answer)) {
+            // 商城 AI 有响应但拿不到正文，说明这套兜底也指望不上，后面不必再试。
+            aiUnavailable = true;
+            noteAiFailure();
+        } else {
+            aiFailures = 0;
+        }
         return answer;
     }
 
     /**
+     * 记一次「两条链路都没拿到内容」的失败，连续 {@link #AI_FAILURE_LIMIT} 次就熔断本轮。
+     * 熔断后不再调用外部接口，也不再去翻候选，避免每项任务都白等两轮超时。
+     */
+    private void noteAiFailure() {
+        aiFailures++;
+        if (aiFailures >= AI_FAILURE_LIMIT && !aiGaveUp) {
+            aiGaveUp = true;
+            System.out.println("[西门子] 文案接口连续 " + aiFailures + " 次失败，本轮不再生成文案");
+        }
+    }
+
+    /**
+     * 调外部文案接口，主模型失败后换备用模型重试一次。
+     * <p>
+     * 三个容器在早上同一分钟内起跑，同时打同一个本地网关；主模型排队排在超时边缘时，
+     * 换一个更轻的备用模型往往能出结果，好过整项任务直接判失败。
+     * 失败计数交给 {@link #generateWithAi} 统一处理：两条链路（外部接口、商城 AI）都拿不到内容才算一次失败。
+     */
+    private String askExternalAiWithRetry(String prompt) {
+        if (!externalAiConfigured()) {
+            return null;
+        }
+        String primary = askExternalAi(prompt, false);
+        if (StrUtil.isNotBlank(primary)) {
+            return primary;
+        }
+        String retry = askExternalAi(prompt, true);
+        if (StrUtil.isNotBlank(retry)) {
+            System.out.println("[西门子] 主模型失败，备用模型生成成功");
+        }
+        return retry;
+    }
+
+    /** 外部文案接口是否配置齐全；没配时不必按失败计数。 */
+    private boolean externalAiConfigured() {
+        return environment != null
+                && StrUtil.isNotBlank(environment.get("AI_BASE_URL"))
+                && StrUtil.isNotBlank(environment.get("AI_API_KEY"))
+                && StrUtil.isNotBlank(environment.get("AI_MODEL"));
+    }
+
+    /**
+     * 本轮是否已经确定再也拿不到 AI 文案。
+     * 调用方据此中止「逐个候选重试」的循环：没有文案时再换一个候选也只是白等。
+     */
+    boolean aiExhausted() {
+        return aiGaveUp;
+    }
+
+    /**
      * 调外部 OpenAI 兼容接口（AI_BASE_URL / AI_API_KEY / AI_MODEL 三项通用配置）。
+     * fallback 为 true 时改用 AI_FALLBACK_MODEL，未配置备用模型则仍用主模型再试一次。
      * 未配置或调用失败时返回 null，由调用方继续降级。
      */
-    private String askExternalAi(String prompt) {
+    private String askExternalAi(String prompt, boolean fallback) {
         String baseUrl = environment == null ? null : environment.get("AI_BASE_URL");
         String apiKey = environment == null ? null : environment.get("AI_API_KEY");
-        String model = environment == null ? null : environment.get("AI_MODEL");
+        String model = fallback
+                ? StrUtil.blankToDefault(environment == null ? null : environment.get("AI_FALLBACK_MODEL"),
+                environment == null ? null : environment.get("AI_MODEL"))
+                : (environment == null ? null : environment.get("AI_MODEL"));
         if (StrUtil.isBlank(baseUrl) || StrUtil.isBlank(apiKey) || StrUtil.isBlank(model)) {
             return null;
         }
@@ -1300,11 +1395,19 @@ public class SiemensCheckInTask extends CheckInTask {
         payload.set("max_tokens", 2000);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Authorization", "Bearer " + apiKey);
-        HttpResult result = post(trimTrailingSlash(baseUrl) + "/chat/completions",
-                payload.toString(), "application/json;charset=UTF-8", headers, AI_TIMEOUT_MILLIS);
+        HttpResult result;
+        try {
+            result = post(trimTrailingSlash(baseUrl) + "/chat/completions",
+                    payload.toString(), "application/json;charset=UTF-8", headers, AI_TIMEOUT_MILLIS);
+        } catch (RuntimeException e) {
+            // 超时、连接被重置都以异常形式抛出。必须在这里接住，否则会一路冒到调用方
+            // 直接判定 AI 不可用，连换备用模型重试的机会都没有。
+            System.out.println("[西门子] 外部 AI 调用失败（" + model + "）：" + e.getMessage() + "，继续降级");
+            return null;
+        }
         JSONObject body = parseObject(result.body);
         if (body == null) {
-            System.out.println("[西门子] 外部 AI HTTP " + result.status + "，继续降级");
+            System.out.println("[西门子] 外部 AI HTTP " + result.status + "（" + model + "），继续降级");
             return null;
         }
         JSONArray choices = body.getJSONArray("choices");

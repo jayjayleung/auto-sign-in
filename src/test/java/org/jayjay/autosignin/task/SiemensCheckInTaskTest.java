@@ -319,6 +319,130 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void fallbackModelRescuesTimedOutPrimary() throws Exception {
+        // 早上三个容器同时打同一个文案网关，主模型经常超时；
+        // 这时必须换备用模型再试一次，而不是直接把这一项任务判失败。
+        AtomicInteger primaryCalls = new AtomicInteger();
+        AtomicInteger fallbackCalls = new AtomicInteger();
+        List<String> models = Collections.synchronizedList(new java.util.ArrayList<>());
+        HttpServer ai = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ai.createContext("/v1/chat/completions", exchange -> {
+            String request = readBody(exchange);
+            String model = JSONUtil.parseObj(request).getStr("model");
+            models.add(model);
+            if ("main-model".equals(model)) {
+                primaryCalls.incrementAndGet();
+                // 主模型：不返回响应体，模拟超时/网关异常。
+                exchange.sendResponseHeaders(504, -1);
+                exchange.close();
+                return;
+            }
+            fallbackCalls.incrementAndGet();
+            String content = JSONUtil.createObj()
+                    .set("choices", new JSONArray().put(JSONUtil.createObj()
+                            .set("message", JSONUtil.createObj().set("content", "备用模型写的回答"))))
+                    .toString();
+            write(exchange, 200, content, "application/json; charset=utf-8");
+        });
+        ai.start();
+        try {
+            Map<String, String> environment = environment();
+            environment.put("AI_BASE_URL", "http://127.0.0.1:" + ai.getAddress().getPort() + "/v1");
+            environment.put("AI_API_KEY", "key");
+            environment.put("AI_MODEL", "main-model");
+            environment.put("AI_FALLBACK_MODEL", "fallback-model");
+            SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);
+
+            assertEquals("备用模型写的回答", task.generateWithAi("写点什么", null));
+            assertEquals(1, primaryCalls.get());
+            assertEquals(1, fallbackCalls.get());
+            assertEquals(Arrays.asList("main-model", "fallback-model"), models);
+            // 救回来之后不该被判成熔断。
+            assertFalse(task.aiExhausted());
+        } finally {
+            ai.stop(0);
+        }
+    }
+
+    @Test
+    public void givesUpAfterRepeatedAiFailures() throws Exception {
+        // 主备都失败时，连续两次之后就熔断本轮，避免每项任务都白等两轮超时。
+        HttpServer ai = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ai.createContext("/v1/chat/completions", exchange -> {
+            exchange.sendResponseHeaders(500, -1);
+            exchange.close();
+        });
+        ai.start();
+        try {
+            Map<String, String> environment = environment();
+            environment.put("AI_BASE_URL", "http://127.0.0.1:" + ai.getAddress().getPort() + "/v1");
+            environment.put("AI_API_KEY", "key");
+            environment.put("AI_MODEL", "main-model");
+            environment.put("AI_FALLBACK_MODEL", "fallback-model");
+            SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);
+
+            assertEquals(null, task.generateWithAi("第一次", null));
+            assertFalse("只失败一次还不能熔断", task.aiExhausted());
+
+            assertEquals(null, task.generateWithAi("第二次", null));
+            assertTrue("连续两次失败后应熔断", task.aiExhausted());
+        } finally {
+            ai.stop(0);
+        }
+    }
+
+    @Test
+    public void contentBankFallsBackToSecondModel() throws Exception {
+        // 补库走的是另一条直连链路，同样要在主模型失败后换备用模型。
+        List<String> models = Collections.synchronizedList(new java.util.ArrayList<>());
+        HttpServer ai = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ai.createContext("/v1/chat/completions", exchange -> {
+            String model = JSONUtil.parseObj(readBody(exchange)).getStr("model");
+            models.add(model);
+            if ("main-model".equals(model)) {
+                exchange.sendResponseHeaders(500, -1);
+                exchange.close();
+                return;
+            }
+            String content = "[{\"title\":\"备用模型标题\",\"body\":\"备用模型正文\"}]";
+            String body = JSONUtil.createObj()
+                    .set("choices", new JSONArray().put(JSONUtil.createObj()
+                            .set("message", JSONUtil.createObj().set("content", content))))
+                    .toString();
+            write(exchange, 200, body, "application/json; charset=utf-8");
+        });
+        ai.start();
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("bank-ai");
+            java.nio.file.Path file = dir.resolve("bank.json");
+            try {
+                Map<String, String> environment = environment();
+                environment.put("AI_BASE_URL", "http://127.0.0.1:" + ai.getAddress().getPort() + "/v1");
+                environment.put("AI_API_KEY", "key");
+                environment.put("AI_MODEL", "main-model");
+                environment.put("AI_FALLBACK_MODEL", "fallback-model");
+                SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);
+                ContentBank bank = new ContentBank(task, file);
+
+                java.lang.reflect.Method generate = ContentBank.class.getDeclaredMethod(
+                        "generate", String.class, int.class);
+                generate.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                List<String[]> generated = (List<String[]>) generate.invoke(bank, ContentBank.ASK, 1);
+
+                assertEquals(1, generated.size());
+                assertEquals("备用模型标题", generated.get(0)[0]);
+                assertEquals(Arrays.asList("main-model", "fallback-model"), models);
+            } finally {
+                java.nio.file.Files.deleteIfExists(file);
+                java.nio.file.Files.deleteIfExists(dir);
+            }
+        } finally {
+            ai.stop(0);
+        }
+    }
+
+    @Test
     public void detectsAlreadyFavoritedQuestion() {
         // 弹窗对已收藏问答返回「您已经收藏过了」，不能当成可提交表单重复提交。
         assertTrue(SiemensAnswerActions.isAlreadyFavorited("<div>您已经收藏过了！<a>查看我的收藏夹</a></div>"));

@@ -196,6 +196,11 @@ final class SiemensAnswerActions {
             if (parts.length < 3) {
                 continue;
             }
+            // 文案接口已经熔断时，换下一个候选也写不出答案，直接收手。
+            if (task.aiExhausted()) {
+                System.out.println("[西门子] 文案接口不可用，停止翻查待回答的问题");
+                break;
+            }
             if (answeredBySiblings.contains(parts[0])) {
                 System.out.println("[西门子] 兄弟账号已答过这条，换个问题：" + parts[0]);
                 continue;
@@ -278,6 +283,11 @@ final class SiemensAnswerActions {
             String[] parts = solved.split("-", 4);
             if (parts.length < 3) {
                 continue;
+            }
+            // 文案接口已经熔断时，后面的候选一条也写不出来，继续翻下去只是空打请求。
+            if (task.aiExhausted()) {
+                System.out.println("[西门子] 文案接口不可用，停止翻查最佳答案候选");
+                break;
             }
             String questionId = parts[0];
             String categoryId = parts[1];
