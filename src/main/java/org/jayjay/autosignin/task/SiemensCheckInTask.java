@@ -463,6 +463,8 @@ public class SiemensCheckInTask extends CheckInTask {
         // SIEMENS_DAILY_TASKS=false 时只签到不动它；失败也不影响签到结果。
         if (dailyTasksEnabled()) {
             answerDailyChallenge();
+            // 25 周年庆的分享抽奖每人一次、奖品含 25 西币，实测有账号漏抽，一起补上。
+            drawAnniversaryPrize();
         }
 
         // 任务都做完后再读一次余额，用差额体现今天实际增加了多少西币。
@@ -494,6 +496,24 @@ public class SiemensCheckInTask extends CheckInTask {
             }
         } catch (Exception e) {
             System.out.println("[西门子] 领取消息西币异常：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 25 周年庆的分享抽奖，每人限一次，奖品含 25 西币。
+     * 实测三个账号里有一个从没抽过（AlreadyDrawn=false），属于纯漏掉的收益。
+     * 抽过、活动结束、未登录都只记日志，不影响签到结果。
+     */
+    private void drawAnniversaryPrize() {
+        try {
+            SiemensAnniversary25.Result result = new SiemensAnniversary25(this).run();
+            if (result.drawn) {
+                addMessage("25 周年抽奖：", StrUtil.blankToDefault(result.message, "已抽奖"));
+            } else if (StrUtil.isNotBlank(result.skipReason)) {
+                System.out.println("[西门子] 25 周年抽奖跳过：" + result.skipReason);
+            }
+        } catch (Exception e) {
+            System.out.println("[西门子] 25 周年抽奖异常：" + e.getMessage());
         }
     }
 

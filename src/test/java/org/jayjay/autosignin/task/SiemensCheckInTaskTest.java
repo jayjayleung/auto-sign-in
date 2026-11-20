@@ -70,6 +70,11 @@ public class SiemensCheckInTaskTest {
     private volatile boolean challengePageSevenDay;
     /** 记录接口调用顺序，用于验证领奖排在答题之前。 */
     private volatile java.util.List<String> challengeCallLog;
+    /** 25 周年抽奖是否已经抽过。 */
+    private volatile boolean anniversaryDrawn;
+    /** 25 周年活动是否已结束（页面出现「活动已结束」）。 */
+    private volatile boolean anniversaryEnded;
+    private final AtomicInteger anniversaryDraws = new AtomicInteger();
     private final AtomicInteger challengeSubmits = new AtomicInteger();
     private final AtomicInteger challengeClaims = new AtomicInteger();
 
@@ -100,6 +105,9 @@ public class SiemensCheckInTaskTest {
         challengeSubmits.set(0);
         challengeClaims.set(0);
         challengeCallLog = null;
+        anniversaryDrawn = false;
+        anniversaryEnded = false;
+        anniversaryDraws.set(0);
         clearChallengeMarker();
         clearCoinNotices();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -115,6 +123,8 @@ public class SiemensCheckInTaskTest {
         server.createContext("/event/AjaxAPI/SevenDaysChallenge.ashx", this::handleChallenge);
         server.createContext("/event/AjaxAPI/SevenDaysPrize.ashx", this::handleChallengePrize);
         server.createContext("/Event/7DaysChallenge/Question.aspx", this::handleChallengePage);
+        server.createContext("/event/Siemens25Anniversary/index.aspx", this::handleAnniversaryPage);
+        server.createContext("/event/AjaxAPI/Siemens25.ashx", this::handleAnniversaryApi);
         server.createContext("/club/bbs/AjaxApi/PostCommitAjax.ashx", this::handlePostCommit);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
@@ -1382,7 +1392,8 @@ public class SiemensCheckInTaskTest {
             first.run();
             assertTrue(challengeSubmits.get() >= 1);
 
-            // 站点本身不拦当天重复答题，必须靠本地记录去重，否则多容器会反复刷同一题。
+            // 站点不拦重复答题但重复提交不推进进度（实测 ff 连答两次仍停在第二天），
+            // 所以必须靠本地记录去重，否则多容器会把站点当刷分入口。
             int before = challengeSubmits.get();
             SiemensCheckInTask second = new SiemensCheckInTask(environment, baseUrl, true);
             second.run();
@@ -1415,18 +1426,18 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
-    public void claimsPendingPrizeShownOnPageEvenWhenAnswerIsDone() throws Exception {
-        // 真实场景（fanfan 账号）：前一天答完但没点领奖，第二天答题页上「点击领奖」仍可见，
-        // 而本次提交返回 IsCanOneDayPrize=false。只认提交返回就会把这笔奖永久漏掉。
-        // 而且站点在答题后会把按钮收回，所以必须先领再答。
+    public void claimsOnlyWhenSiteSaysPrizeIsAvailable() throws Exception {
+        // 页面上的领奖按钮不能当判据：实测已领过奖的账号按钮常年亮着（main/no1 都是第 1 天），
+        // 没奖的账号按钮却是隐藏的（ff 第 2 天）。所以只认提交返回的 IsCanOneDayPrize，
+        // 否则每天都会白白重复提交一次领奖。
         challengePageOneDay = true;
         challengeOneDayPrize = false;
         Map<String, String> environment = environment();
         SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
         try {
             task.run();
-            assertEquals(1, challengeClaims.get());
-            assertTrue(plainText(task).contains("已领答题奖励"));
+            assertEquals(0, challengeClaims.get());
+            assertFalse(plainText(task).contains("已领答题奖励"));
         } finally {
             clearRunMarker();
             clearChallengeMarker();
@@ -1434,46 +1445,50 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
-    public void claimsPagePrizeBeforeSubmittingAnswer() throws Exception {
-        // 站点答题后会把页面上那笔待领奖品收回，所以领奖请求必须排在答题请求之前，
-        // 否则这笔奖会一直挂着领不到。
-        challengePageOneDay = true;
-        challengeOneDayPrize = false;
-        java.util.List<String> calls = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
-        challengeCallLog = calls;
+    public void drawsAnniversaryPrizeWhenNotDrawnYet() throws Exception {
+        anniversaryDrawn = false;
         SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
         try {
             task.run();
-            int claim = calls.indexOf("claim");
-            int submit = calls.indexOf("submit");
-            assertTrue("未领奖：" + calls, claim >= 0);
-            assertTrue("未答题：" + calls, submit >= 0);
-            assertTrue("领奖必须早于答题，实际顺序：" + calls, claim < submit);
+            assertEquals(1, anniversaryDraws.get());
+            assertTrue("实际：" + plainText(task), plainText(task).contains("25 周年抽奖：恭喜您抽中"));
         } finally {
             clearRunMarker();
             clearChallengeMarker();
-            challengeCallLog = null;
         }
     }
 
     @Test
-    public void claimsPendingPrizeWhenAlreadyAnsweredToday() throws Exception {
-        // 当天已答过（本地有标记）也应补领页面上遗留的奖品，而不是直接跳过整段流程。
-        Map<String, String> environment = environment();
-        SiemensCheckInTask first = new SiemensCheckInTask(environment, baseUrl, true);
+    public void skipsAnniversaryDrawWhenAlreadyDrawn() throws Exception {
+        anniversaryDrawn = true;
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
         try {
-            first.run();
-            int submits = challengeSubmits.get();
-            challengePageOneDay = true;
-            challengePageSevenDay = false;
-            SiemensCheckInTask second = new SiemensCheckInTask(environment, baseUrl, true);
-            second.run();
-            // 不重复提交答案，但要把页面上那笔奖领掉。
-            assertEquals(submits, challengeSubmits.get());
-            assertTrue("实际：" + plainText(second), challengeClaims.get() >= 1);
+            task.run();
+
+            // 每人只能抽一次，已经抽过就不该再打抽奖接口。
+            assertEquals(0, anniversaryDraws.get());
+            assertFalse(plainText(task).contains("25 周年抽奖"));
         } finally {
             clearRunMarker();
             clearChallengeMarker();
+        }
+    }
+
+    @Test
+    public void skipsAnniversaryDrawAfterEventEnded() throws Exception {
+        anniversaryEnded = true;
+        anniversaryDrawn = false;
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
+        try {
+            task.run();
+
+            // 活动结束后页面有明确文案，不该再去打接口。
+            assertEquals(0, anniversaryDraws.get());
+            assertFalse(plainText(task).contains("25 周年抽奖"));
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+            anniversaryEnded = false;
         }
     }
 
@@ -1482,7 +1497,8 @@ public class SiemensCheckInTaskTest {
         String shown = "<button class=\"prime\" style='display: inline-block' id=\"btnPrizeOneDay\">点击领奖</button>";
         String hidden = "<button class=\"prime\" style=\"display: none;\" id=\"btnPrizeOneDay\">点击领奖</button>";
 
-        // 按钮可见才代表有奖可领；隐藏时不能平白多打一次领奖接口。
+        // 按钮可见表示今天是第 1/4/7 天（有奖），隐藏表示普通天数；
+        // 但「可见」不代表奖没领过，所以它只用来理解页面，不用于决定是否提交。
         assertTrue(SiemensChallenge.isPrizeButtonShown(shown, "btnPrizeOneDay"));
         assertFalse(SiemensChallenge.isPrizeButtonShown(hidden, "btnPrizeOneDay"));
         assertFalse(SiemensChallenge.isPrizeButtonShown("", "btnPrizeOneDay"));
@@ -1731,6 +1747,33 @@ public class SiemensCheckInTaskTest {
         }
         write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AwardType\":0,\"AwardMsg\":null}",
                 "application/json; charset=utf-8");
+    }
+
+    /** 模拟 25 周年活动页：把用户 ID 写进脚本，活动结束后出现对应文案。 */
+    private void handleAnniversaryPage(HttpExchange exchange) throws IOException {
+        String uid = authed(exchange) ? "42" : "0";
+        String ended = anniversaryEnded ? "<p>活动已结束</p>" : "";
+        write(exchange, 200, "<html><body>" + ended
+                + "<script>var s25UserId = Number('" + uid + "');</script>"
+                + "</body></html>", "text/html; charset=utf-8");
+    }
+
+    /** 模拟 25 周年抽奖接口：getstatus 回报是否抽过，shareanddraw 抽一次。 */
+    private void handleAnniversaryApi(HttpExchange exchange) throws IOException {
+        String body = readBody(exchange);
+        if (body.contains("type=getstatus")) {
+            write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AlreadyDrawn\":"
+                    + anniversaryDrawn + ",\"AwardType\":0,\"AwardMsg\":null}", "application/json");
+            return;
+        }
+        if (body.contains("type=shareanddraw")) {
+            anniversaryDraws.incrementAndGet();
+            write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AlreadyDrawn\":true,"
+                    + "\"AwardType\":9,\"AwardMsg\":\"恭喜您抽中“25西币”，西币奖励已到账，请及时查看！\"}",
+                    "application/json");
+            return;
+        }
+        write(exchange, 200, "{\"ErrorCode\":0}", "application/json");
     }
 
     private void handlePostCommit(HttpExchange exchange) throws IOException {

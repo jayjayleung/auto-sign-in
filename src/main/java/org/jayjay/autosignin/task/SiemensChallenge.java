@@ -78,27 +78,20 @@ final class SiemensChallenge {
             result.skipReason = "答题页未登录";
             return result;
         }
-        // 页面上的「点击领奖」按钮可见，说明有一笔奖品还没领。实测这笔奖可能在答题之后就
-        // 被站点收回去（按钮变回隐藏），所以必须在答题**之前**先领，不能等提交返回再说。
-        if (isPrizeButtonShown(page.body, "btnPrizeOneDay")) {
-            result.claimed = claimOneDayPrize(userId);
-        }
-        // 第 7 天答完首页会显示「点击抽奖」，有次数就先抽掉，和答题互不影响。
-        if (isPrizeButtonShown(page.body, "btnPrizeSevenDay")) {
-            drawPrize(userId, result);
-        }
-
+        // 领奖按钮的可见性不可靠：实测 main/no1 答完并已领过奖，按钮仍常年是亮的；
+        // 而 ff 没奖可领时按钮却是隐藏的。所以不拿它当判据，只按提交返回的
+        // IsCanOneDayPrize / IsCanSevenDayPrize 决定要不要领，避免无谓的重复提交。
         if (task.challengeAnsweredToday()) {
-            // 站点不拦重复答题，所以「今天答过没有」由本地记录决定，避免多容器同时刷同一题。
+            // 站点不拦重复答题，但重复提交不会推进进度（实测 ff 连答两次仍停在第二天），
+            // 所以「今天答过没有」由本地记录决定，避免多容器把站点当刷分入口。
             System.out.println("[西门子] 今天已经答过 7 天挑战赛的题，跳过");
             return result;
         }
         answerToday(userId, result);
-        // 本次答完又拿到新奖品时补领一次；已经领过的不重复点。
-        if (result.oneDayPrize && !result.claimed) {
+        if (result.oneDayPrize) {
             result.claimed = claimOneDayPrize(userId);
         }
-        if (result.drawAllowed && !result.drew) {
+        if (result.drawAllowed) {
             drawPrize(userId, result);
         }
         return result;
@@ -134,7 +127,7 @@ final class SiemensChallenge {
                 + "，正确答案 " + StrUtil.blankToDefault(response.getStr("TrueAnswer"), answer));
     }
 
-    /** 答题页上的领奖/抽奖按钮是否可见，可见说明这笔奖还没领。 */
+    /** 答题页上的领奖/抽奖按钮是否可见，可见说明今天是第 1/4/7 天、有奖可领。 */
     static boolean isPrizeButtonShown(String html, String buttonId) {
         if (StrUtil.isBlank(html)) {
             return false;
