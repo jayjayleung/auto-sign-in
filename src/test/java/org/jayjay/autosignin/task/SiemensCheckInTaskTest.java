@@ -51,6 +51,12 @@ public class SiemensCheckInTaskTest {
     private volatile boolean rejectPost;
     /** 任务列表接口不可用时置位，模拟接口故障。 */
     private volatile boolean tasksUnreadable;
+    /** 消息中心里待领取的获奖通知 ID，按顺序返回。 */
+    private final java.util.Set<String> coinNotices = new java.util.LinkedHashSet<>();
+    /** 领取接口挂掉时置位，用来验证失败不记账。 */
+    private volatile boolean pickupBroken;
+    /** 领取接口被调用的次数。 */
+    private final AtomicInteger pickupPosts = new AtomicInteger();
 
     @Before
     public void setUp() throws IOException {
@@ -67,6 +73,10 @@ public class SiemensCheckInTaskTest {
         tasksLeft.set(0);
         rejectPost = false;
         tasksUnreadable = false;
+        coinNotices.clear();
+        pickupBroken = false;
+        pickupPosts.set(0);
+        clearCoinNotices();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/MySupport/index.aspx", this::handleIndex);
         server.createContext("/frontend/login", this::handleLoginPage);
@@ -74,6 +84,9 @@ public class SiemensCheckInTaskTest {
         server.createContext("/sso/callback", this::handleCallback);
         server.createContext("/MySupport/AjaxAPI/SignInAjax.ashx", this::handleSign);
         server.createContext("/MySupport/AjaxAPI/EventTasksAjax.ashx", this::handleTasks);
+        server.createContext("/MySupport/MyMsgmain.aspx", this::handleMessageList);
+        server.createContext("/MySupport/MyMsgDetail.aspx", this::handleMessageDetail);
+        server.createContext("/club/bbs/PickupCoin.aspx", this::handlePickupCoin);
         server.createContext("/club/bbs/AjaxApi/PostCommitAjax.ashx", this::handlePostCommit);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
@@ -1173,6 +1186,17 @@ public class SiemensCheckInTaskTest {
         java.nio.file.Files.deleteIfExists(marker);
     }
 
+    /** 清掉西币奖励通知的处理记录，避免测试之间互相影响。 */
+    private static void clearCoinNotices() {
+        java.nio.file.Path file = SiemensCheckInTask.stateDir().resolve("siemens-coin-notices-"
+                + SiemensCheckInTask.sha1Hex("user@example.com").substring(0, 12) + ".txt");
+        try {
+            java.nio.file.Files.deleteIfExists(file);
+        } catch (Exception e) {
+            // 清不掉不影响断言：每条用例用的 ID 都不同。
+        }
+    }
+
     @Test
     public void sendsDomainCookiesOnlyToMatchingHosts() {
         SiemensCheckInTask.CookieJar jar = new SiemensCheckInTask.CookieJar();
@@ -1226,6 +1250,73 @@ public class SiemensCheckInTaskTest {
         } finally {
             java.nio.file.Files.deleteIfExists(file);
         }
+    }
+
+    @Test
+    public void claimsCoinRewardsFromMessageCenter() {
+        coinNotices.add("1001");
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        task.run();
+
+        // 消息里带领取链接的必须真的提交一次，金额写进通知。
+        assertEquals(1, pickupPosts.get());
+        assertTrue(plainText(task).contains("消息奖励：领取 1 笔，西币 10"));
+        clearCoinNotices();
+    }
+
+    @Test
+    public void skipsCoinNoticeWithoutPickupLink() {
+        coinNotices.add("1002");
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        task.run();
+
+        // 贺信类通知没有领取链接，不该发起领取请求，但要记下来免得天天重复抓。
+        assertEquals(0, pickupPosts.get());
+        assertFalse(plainText(task).contains("消息奖励"));
+        assertTrue(task.handledCoinNotices().contains("1002"));
+        clearCoinNotices();
+    }
+
+    @Test
+    public void reportsCoinRewardsAlreadyClaimed() {
+        coinNotices.add("1003");
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        task.run();
+
+        // 站点回「已领取过」不是失败，也不该每天再问一次。
+        assertEquals(1, pickupPosts.get());
+        assertFalse(plainText(task).contains("未成功"));
+        assertTrue(task.handledCoinNotices().contains("1003"));
+        clearCoinNotices();
+    }
+
+    @Test
+    public void doesNotRememberFailedClaim() {
+        coinNotices.add("1004");
+        pickupBroken = true;
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl);
+        task.run();
+
+        // 领取失败不能记账，奖励 60 天内都能补领，下次必须重试。
+        assertFalse(task.handledCoinNotices().contains("1004"));
+        assertTrue(plainText(task).contains("1 笔领取未成功"));
+        clearCoinNotices();
+    }
+
+    @Test
+    public void parsesOnlyAwardNotices() {
+        String html = "<dl class=\"\"><dt><a href=\"MyMsgDetail.aspx?noticeId=1\">"
+                + "<span class=\"tag\">获奖通知</span><div class=\"center\" title=\"奖励\"></div></a></dt></dl>"
+                + "<dl class=\"\"><dt><a href=\"MyMsgDetail.aspx?noticeId=2\">"
+                + "<span class=\"tag\">管理员通知</span><div class=\"center\" title=\"故事审核通知\"></div></a></dt>"
+                + "</dl>";
+        java.util.List<?> notices = SiemensCoinRewards.parseNotices(html);
+
+        // 故事审核、关注提醒这类通知没有西币，不能白白多抓详情页。
+        assertEquals(1, notices.size());
+        // 分页总数取列表页脚本里的 initPage(1, N)，取不到按单页处理。
+        assertEquals(2, SiemensCoinRewards.pageCount("<script>initPage(1, 2);</script>"));
+        assertEquals(1, SiemensCoinRewards.pageCount("没有分页脚本"));
     }
 
     private static String plainText(SiemensCheckInTask task) {
@@ -1350,6 +1441,49 @@ public class SiemensCheckInTaskTest {
             tasks.append(",{\"TaskType\":1,\"EventTasksStatus\":1,\"TaskName\":\"NewMySupport_BBSPostStoryArticle\"}");
         }
         write(exchange, 200, "{\"TaskList\":[" + tasks + "]}", "application/json; charset=utf-8");
+    }
+
+    /**
+     * 模拟消息中心列表：只有获奖通知，且都带「领取获奖西币」链接。
+     * 1004 的领取接口故意返回非成功页，用来验证失败不记账。
+     */
+    private void handleMessageList(HttpExchange exchange) throws IOException {
+        StringBuilder html = new StringBuilder("<html><body>");
+        for (String id : coinNotices) {
+            html.append("<dl class=\"\"><dt class=\"clearfix\"><a href=\"MyMsgDetail.aspx?noticeId=")
+                    .append(id).append("\"><img src=\"NewResources/img/msg/msg-no.png\" />")
+                    .append("<span class=\"tag\">获奖通知</span><div class=\"left\"></div>")
+                    .append("<div class=\"center\" title=\"奖励通知\"></div></a></dt></dl>");
+        }
+        html.append("<script>initPage(1, 1);</script></body></html>");
+        write(exchange, 200, html.toString(), "text/html; charset=utf-8");
+    }
+
+    private void handleMessageDetail(HttpExchange exchange) throws IOException {
+        String query = exchange.getRequestURI().getQuery();
+        String id = query == null ? "" : query.replaceAll(".*noticeId=(\\d+).*", "$1");
+        // 1002 是贺信：有获奖通知但内容里不带领取链接。
+        String body = "1002".equals(id)
+                ? "<div class=\"msg-detail-btm\">恭喜您获得「找答案快侠」称号！</div>"
+                : "<div class=\"msg-detail-btm\">恭喜您获得奖励西币10枚！请您<a href=\""
+                + baseUrl + "/club/bbs/PickupCoin.aspx?ulevel=0&id=9" + id
+                + "\">领取获奖西币10枚</a>。</div>";
+        write(exchange, 200, body, "text/html; charset=utf-8");
+    }
+
+    private void handlePickupCoin(HttpExchange exchange) throws IOException {
+        pickupPosts.incrementAndGet();
+        if (pickupBroken) {
+            write(exchange, 500, "error", "text/plain; charset=utf-8");
+            return;
+        }
+        String id = exchange.getRequestURI().getQuery();
+        // 1003 表示这笔之前已经领过，站点对同一笔奖励是幂等的。
+        boolean claimed = !(id != null && id.contains("91003"));
+        write(exchange, 200, claimed
+                ? "<div class=\"bs_jm\">恭喜您，成功领取，奖励西币 <span>10</span> 枚！</div>"
+                : "<div class=\"title-content\"><b>对不起，您已领取过该奖励！</b></div>",
+                "text/html; charset=utf-8");
     }
 
     private void handlePostCommit(HttpExchange exchange) throws IOException {

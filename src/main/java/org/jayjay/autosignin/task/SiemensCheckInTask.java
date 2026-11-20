@@ -454,6 +454,10 @@ public class SiemensCheckInTask extends CheckInTask {
             completeDailyTasks();
         }
 
+        // 论坛发帖、回答被采纳这类奖励只发一条站内消息，要手动点「领取」才入账，
+        // 60 天内不领会作废。这里统一扫一遍消息中心补齐，顺带也能领到本次任务刚发的奖励。
+        claimCoinRewards();
+
         // 任务都做完后再读一次余额，用差额体现今天实际增加了多少西币。
         // 签到和西币合成一句放在最后输出，因为余额要等任务跑完才准确。
         Profile after = loadProfile();
@@ -463,6 +467,27 @@ public class SiemensCheckInTask extends CheckInTask {
                 ? coinAfter - coinBefore : null;
         addMessageFirst(signSummary(result, detail.getStr("SignCount"), coinValue, gained));
         return null;
+    }
+
+    /**
+     * 领取消息中心里的西币奖励。
+     * <p>
+     * 论坛发帖、回帖、找答案活动这类奖励只发一条站内消息，要求手动点「领取」才入账，
+     * 60 天内不领会作废；签到和抽奖是自动到账的，不在这里处理。
+     * 领取失败不影响签到结果，奖励有 60 天有效期，下次运行还会再试。
+     */
+    private void claimCoinRewards() {
+        try {
+            SiemensCoinRewards.Result result = new SiemensCoinRewards(this).collect();
+            if (result.claimed > 0) {
+                addMessage("消息奖励：", "领取 " + result.claimed + " 笔，西币 " + result.coins);
+            }
+            if (result.failed > 0) {
+                addMessage("消息奖励：", result.failed + " 笔领取未成功，稍后会重试");
+            }
+        } catch (Exception e) {
+            System.out.println("[西门子] 领取消息西币异常：" + e.getMessage());
+        }
     }
 
     /**
@@ -1811,6 +1836,56 @@ public class SiemensCheckInTask extends CheckInTask {
         } catch (Exception e) {
             // 写不进去只会导致下次重复报一次。
         }
+    }
+
+    /**
+     * 已经确认处理过的西币奖励通知 ID，按账号存。
+     * 领取接口对同一笔奖励幂等（重复提交回「已领取过」），所以记账只是为了少抓详情页；
+     * 只有真的领到、或站点明确说已领过才写，网络失败不写，留给下次重试。
+     */
+    Set<String> handledCoinNotices() {
+        Set<String> ids = new HashSet<>();
+        Path file = coinNoticePath();
+        if (file == null || !Files.exists(file)) {
+            return ids;
+        }
+        try {
+            String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            for (String line : text.split("\\R")) {
+                if (StrUtil.isNotBlank(line)) {
+                    ids.add(line.trim());
+                }
+            }
+        } catch (Exception e) {
+            // 读不到就当没处理过，最多重复提交一次，站点会回「已领取」。
+        }
+        return ids;
+    }
+
+    void markCoinNoticeHandled(String noticeId) {
+        if (StrUtil.isBlank(noticeId)) {
+            return;
+        }
+        Path file = coinNoticePath();
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.write(file, (noticeId.trim() + "\n").getBytes(StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception e) {
+            // 写不进去只会导致下次再查一遍同一条通知。
+        }
+    }
+
+    private Path coinNoticePath() {
+        String username = environment == null ? null : environment.get(USERNAME_KEY);
+        if (StrUtil.isBlank(username)) {
+            return null;
+        }
+        return stateDir().resolve("siemens-coin-notices-" + sha1Hex(username.trim()).substring(0, 12) + ".txt");
     }
 
     private Path reviewIdsPath() {
