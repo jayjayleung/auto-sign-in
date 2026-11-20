@@ -534,7 +534,6 @@ public class SiemensCheckInTask extends CheckInTask {
             return;
         }
         System.out.println("[西门子] 待完成每日任务：" + pending);
-        refillContentBanks(pending);
         // 三个账号互相当托的闭环：先登记并采纳兄弟账号的回答，再做本站的问答类任务。
         String myUid = currentUserId;
         try {
@@ -629,6 +628,10 @@ public class SiemensCheckInTask extends CheckInTask {
         if (aborted == null) {
             markRanToday();
         }
+        // 补库放在所有任务之后：它一次要生成十几条内容、独占文案网关好几分钟，
+        // 排在前面会把回帖、评论、回答这些必须现场生成的任务挤到超时。
+        // 即使这一轮补库没补完也没关系，库存是跨天累积的，下次运行时还会继续补。
+        refillContentBanks(pending);
         reportRemaining(aborted);
     }
 

@@ -37,17 +37,18 @@ final class ContentBank {
     /** 库存低于这个数就在运行开头补货。设得比首次补货量低，才能逐步累积而不是每天补一次。 */
     static final int LOW_WATERMARK = 5;
     /**
-     * 补货目标条数。每账号每天用 1 条：
-     * 库空时只补到 {@link #FIRST_FILL} 条，避免首次运行因生成太多内容而拖太久；
-     * 之后每次不足水位线就补齐到 {@link #TARGET_SIZE}，逐步累积。
+     * 补货目标条数。每账号每天只消耗 1 条，20 条的库存要 20 天才用得完，
+     * 一次性补满要多生成十几条、独占文案网关好几分钟，收益远不抵成本。
+     * 降到 10 条：既留出足够的标题多样性（站点对标题做全局查重），
+     * 又让每次补货最多两批就结束。
      */
-    static final int TARGET_SIZE = 20;
+    static final int TARGET_SIZE = 10;
     /** 库完全为空时的首次补货目标，约 1 分钟，避免三个库一起补把运行拖到十分钟。 */
-    static final int FIRST_FILL = 10;
+    static final int FIRST_FILL = 8;
     /** 每批生成条数：批次太大推理模型容易超时，5 条实测约 25-40 秒。 */
     private static final int BATCH_SIZE = 5;
-    /** 补货最多尝试几批：补满 20 条只需 3 批，多留几批应对偶发失败。 */
-    private static final int MAX_BATCHES = 6;
+    /** 补货最多尝试几批：补满 10 条只需 2 批，多留几批应对偶发失败。 */
+    private static final int MAX_BATCHES = 4;
     /** 单批生成超时。推理模型较慢，给足余量但要能在 cron 任务里跑完。 */
     private static final int GENERATE_TIMEOUT_MILLIS = 240_000;
     /**
@@ -55,8 +56,12 @@ final class ContentBank {
      * 备用模型本来就是拿来抢时间的，不必再给满 4 分钟，否则一次补库就会吃掉大半预算。
      */
     private static final int FALLBACK_TIMEOUT_MILLIS = 90_000;
-    /** 整轮运行里补库的总时长上限，三个库共享这一份预算。 */
-    static final long REFILL_BUDGET_MILLIS = 10 * 60_000L;
+    /**
+     * 整轮运行里补库的总时长上限，三个库共享这一份预算。
+     * 补库现在排在所有每日任务之后，这一份就是整轮运行最后可能多出来的时间；
+     * 5 分钟足够补完 10 条库存的两批生成，超出说明文案接口有问题，不值得继续等。
+     */
+    static final long REFILL_BUDGET_MILLIS = 5 * 60_000L;
 
     /** 业务时区固定北京时间：容器和 GitHub Actions 的 TZ 不同，日期口径必须显式指定。 */
     private static final java.time.ZoneId SHANGHAI = java.time.ZoneId.of("Asia/Shanghai");
@@ -109,10 +114,14 @@ final class ContentBank {
 
     /**
      * 补货：库存不足时批量生成直到达标。
-     * 在运行开头调用，失败不影响签到和不需要文案的任务。
+     * <p>
+     * 在**所有每日任务之后**调用。补库要批量生成十几条内容，会在几分钟内占满文案网关，
+     * 排在前面会把回帖、评论、回答这些必须现场生成的任务挤到超时（实测过：
+     * 补库耗时 4 分 49 秒后，同一轮里的回答、评论、回帖全部 Read timed out 跳过）。
+     * 放在末尾，即使这轮没补完也不影响当天任务，库存跨天累积，下次继续补。
      * <p>
      * 库完全为空时只补到 {@link #FIRST_FILL} 条，避免首次运行一次性生成太多而拖长时间；
-     * 已有库存但跌破水位线时补齐到 {@link #TARGET_SIZE}，逐步累积到满。
+     * 已有库存但跌破水位线时补齐到 {@link #TARGET_SIZE}。
      * 总时长按整轮运行共享：三个库一起补时不能各算各的，否则会串成半小时。
      */
     void refillIfLow(String kind, long deadline) {
