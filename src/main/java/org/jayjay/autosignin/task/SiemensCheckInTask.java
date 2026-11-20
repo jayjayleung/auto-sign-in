@@ -458,6 +458,13 @@ public class SiemensCheckInTask extends CheckInTask {
         // 60 天内不领会作废。这里统一扫一遍消息中心补齐，顺带也能领到本次任务刚发的奖励。
         claimCoinRewards();
 
+        // 签到弹层底部还有「7 天挑战赛」每日答题，站点的题库接口直接带正确答案，
+        // 中断一天就重新计轮次，所以每天跟一次。它属于每日任务的一部分，
+        // SIEMENS_DAILY_TASKS=false 时只签到不动它；失败也不影响签到结果。
+        if (dailyTasksEnabled()) {
+            answerDailyChallenge();
+        }
+
         // 任务都做完后再读一次余额，用差额体现今天实际增加了多少西币。
         // 签到和西币合成一句放在最后输出，因为余额要等任务跑完才准确。
         Profile after = loadProfile();
@@ -487,6 +494,37 @@ public class SiemensCheckInTask extends CheckInTask {
             }
         } catch (Exception e) {
             System.out.println("[西门子] 领取消息西币异常：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 7 天挑战赛的每日答题。题目由站点随机下发，接口里连正确答案一起返回，
+     * 所以不需要猜答案；活动按连续 7 天计轮次，中断一天就重来，因此每天都要跟。
+     * 失败只记日志，不影响签到和每日任务。
+     */
+    private void answerDailyChallenge() {
+        try {
+            SiemensChallenge.Result result = new SiemensChallenge(this).run();
+            if (StrUtil.isNotBlank(result.skipReason)) {
+                System.out.println("[西门子] 7 天挑战赛跳过：" + result.skipReason);
+            }
+            // 今天没答题、也没补领到任何东西时不必占一行通知。
+            if (!result.answered && !result.claimed && StrUtil.isBlank(result.drawMessage)) {
+                return;
+            }
+            List<String> parts = new ArrayList<>();
+            if (result.answered) {
+                parts.add(result.correct ? "答题正确" : "答题错误");
+            }
+            if (result.claimed) {
+                parts.add("已领答题奖励");
+            }
+            if (StrUtil.isNotBlank(result.drawMessage)) {
+                parts.add("抽奖：" + result.drawMessage);
+            }
+            addMessage("7 天挑战：", String.join("，", parts));
+        } catch (Exception e) {
+            System.out.println("[西门子] 7 天挑战赛异常：" + e.getMessage());
         }
     }
 
@@ -1886,6 +1924,45 @@ public class SiemensCheckInTask extends CheckInTask {
             return null;
         }
         return stateDir().resolve("siemens-coin-notices-" + sha1Hex(username.trim()).substring(0, 12) + ".txt");
+    }
+
+    /**
+     * 7 天挑战赛今天是否已经答过。
+     * 答题接口不限制当天重复提交（同一题连答三次都返回成功），所以「今天答过没有」
+     * 只能靠本地记录，否则多容器或重跑会把站点当刷分入口。
+     */
+    boolean challengeAnsweredToday() {
+        Path file = challengeMarkerPath();
+        if (file == null || !Files.exists(file)) {
+            return false;
+        }
+        try {
+            String saved = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).trim();
+            return LocalDate.now(SHANGHAI).toString().equals(saved);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    void markChallengeAnswered() {
+        Path file = challengeMarkerPath();
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.write(file, LocalDate.now(SHANGHAI).toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            // 写不进去只会导致下次多提交一次答案，站点不拦。
+        }
+    }
+
+    private Path challengeMarkerPath() {
+        String username = environment == null ? null : environment.get(USERNAME_KEY);
+        if (StrUtil.isBlank(username)) {
+            return null;
+        }
+        return stateDir().resolve("siemens-challenge-" + sha1Hex(username.trim()).substring(0, 12) + ".txt");
     }
 
     private Path reviewIdsPath() {

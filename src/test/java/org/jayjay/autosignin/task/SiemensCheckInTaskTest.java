@@ -57,6 +57,21 @@ public class SiemensCheckInTaskTest {
     private volatile boolean pickupBroken;
     /** 领取接口被调用的次数。 */
     private final AtomicInteger pickupPosts = new AtomicInteger();
+    /** 7 天挑战赛的题目与正确答案，站点接口会一起下发。 */
+    private volatile String challengeQuestionId = "501";
+    private volatile String challengeAnswer = "A,B";
+    /** 站点是否认为这次答题正确；与 challengeAnswer 分开，便于模拟「答错」。 */
+    private volatile boolean challengeCorrect = true;
+    /** 站点是否允许领取第一天奖品。 */
+    private volatile boolean challengeOneDayPrize = true;
+    /** 答题页上「点击领奖」按钮是否可见，模拟前一天遗留的未领奖品。 */
+    private volatile boolean challengePageOneDay;
+    /** 答题页上「点击抽奖」按钮是否可见。 */
+    private volatile boolean challengePageSevenDay;
+    /** 记录接口调用顺序，用于验证领奖排在答题之前。 */
+    private volatile java.util.List<String> challengeCallLog;
+    private final AtomicInteger challengeSubmits = new AtomicInteger();
+    private final AtomicInteger challengeClaims = new AtomicInteger();
 
     @Before
     public void setUp() throws IOException {
@@ -76,6 +91,16 @@ public class SiemensCheckInTaskTest {
         coinNotices.clear();
         pickupBroken = false;
         pickupPosts.set(0);
+        challengeQuestionId = "501";
+        challengeAnswer = "A,B";
+        challengeCorrect = true;
+        challengeOneDayPrize = true;
+        challengePageOneDay = false;
+        challengePageSevenDay = false;
+        challengeSubmits.set(0);
+        challengeClaims.set(0);
+        challengeCallLog = null;
+        clearChallengeMarker();
         clearCoinNotices();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/MySupport/index.aspx", this::handleIndex);
@@ -87,6 +112,9 @@ public class SiemensCheckInTaskTest {
         server.createContext("/MySupport/MyMsgmain.aspx", this::handleMessageList);
         server.createContext("/MySupport/MyMsgDetail.aspx", this::handleMessageDetail);
         server.createContext("/club/bbs/PickupCoin.aspx", this::handlePickupCoin);
+        server.createContext("/event/AjaxAPI/SevenDaysChallenge.ashx", this::handleChallenge);
+        server.createContext("/event/AjaxAPI/SevenDaysPrize.ashx", this::handleChallengePrize);
+        server.createContext("/Event/7DaysChallenge/Question.aspx", this::handleChallengePage);
         server.createContext("/club/bbs/AjaxApi/PostCommitAjax.ashx", this::handlePostCommit);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
@@ -1197,6 +1225,17 @@ public class SiemensCheckInTaskTest {
         }
     }
 
+    /** 清掉 7 天挑战赛的当天答题标记，避免测试之间互相影响。 */
+    private static void clearChallengeMarker() {
+        java.nio.file.Path file = SiemensCheckInTask.stateDir().resolve("siemens-challenge-"
+                + SiemensCheckInTask.sha1Hex("user@example.com").substring(0, 12) + ".txt");
+        try {
+            java.nio.file.Files.deleteIfExists(file);
+        } catch (Exception e) {
+            // 清不掉不影响断言。
+        }
+    }
+
     @Test
     public void sendsDomainCookiesOnlyToMatchingHosts() {
         SiemensCheckInTask.CookieJar jar = new SiemensCheckInTask.CookieJar();
@@ -1262,6 +1301,7 @@ public class SiemensCheckInTaskTest {
         assertEquals(1, pickupPosts.get());
         assertTrue(plainText(task).contains("消息奖励：领取 1 笔，西币 10"));
         clearCoinNotices();
+        clearChallengeMarker();
     }
 
     @Test
@@ -1317,6 +1357,155 @@ public class SiemensCheckInTaskTest {
         // 分页总数取列表页脚本里的 initPage(1, N)，取不到按单页处理。
         assertEquals(2, SiemensCoinRewards.pageCount("<script>initPage(1, 2);</script>"));
         assertEquals(1, SiemensCoinRewards.pageCount("没有分页脚本"));
+    }
+
+    @Test
+    public void answersChallengeQuestionWithSiteAnswer() throws Exception {
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
+        try {
+            task.run();
+
+            // 题库接口直接带正确答案，程序按答案提交即可，不需要猜。
+            assertEquals(1, challengeSubmits.get());
+            assertTrue(plainText(task).contains("7 天挑战：答题正确"));
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+        }
+    }
+
+    @Test
+    public void skipsChallengeWhenAlreadyAnsweredToday() throws Exception {
+        Map<String, String> environment = environment();
+        SiemensCheckInTask first = new SiemensCheckInTask(environment, baseUrl, true);
+        try {
+            first.run();
+            assertTrue(challengeSubmits.get() >= 1);
+
+            // 站点本身不拦当天重复答题，必须靠本地记录去重，否则多容器会反复刷同一题。
+            int before = challengeSubmits.get();
+            SiemensCheckInTask second = new SiemensCheckInTask(environment, baseUrl, true);
+            second.run();
+            assertEquals(before, challengeSubmits.get());
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+        }
+    }
+
+    @Test
+    public void claimsOneDayPrizeOnlyWhenSiteAllows() throws Exception {
+        challengeOneDayPrize = false;
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
+        try {
+            task.run();
+            assertEquals(0, challengeClaims.get());
+
+            clearRunMarker();
+            clearChallengeMarker();
+            challengeOneDayPrize = true;
+            SiemensCheckInTask again = new SiemensCheckInTask(environment(), baseUrl, true);
+            again.run();
+            assertEquals(1, challengeClaims.get());
+            assertTrue(plainText(again).contains("已领答题奖励"));
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+        }
+    }
+
+    @Test
+    public void claimsPendingPrizeShownOnPageEvenWhenAnswerIsDone() throws Exception {
+        // 真实场景（fanfan 账号）：前一天答完但没点领奖，第二天答题页上「点击领奖」仍可见，
+        // 而本次提交返回 IsCanOneDayPrize=false。只认提交返回就会把这笔奖永久漏掉。
+        // 而且站点在答题后会把按钮收回，所以必须先领再答。
+        challengePageOneDay = true;
+        challengeOneDayPrize = false;
+        Map<String, String> environment = environment();
+        SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
+        try {
+            task.run();
+            assertEquals(1, challengeClaims.get());
+            assertTrue(plainText(task).contains("已领答题奖励"));
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+        }
+    }
+
+    @Test
+    public void claimsPagePrizeBeforeSubmittingAnswer() throws Exception {
+        // 站点答题后会把页面上那笔待领奖品收回，所以领奖请求必须排在答题请求之前，
+        // 否则这笔奖会一直挂着领不到。
+        challengePageOneDay = true;
+        challengeOneDayPrize = false;
+        java.util.List<String> calls = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        challengeCallLog = calls;
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
+        try {
+            task.run();
+            int claim = calls.indexOf("claim");
+            int submit = calls.indexOf("submit");
+            assertTrue("未领奖：" + calls, claim >= 0);
+            assertTrue("未答题：" + calls, submit >= 0);
+            assertTrue("领奖必须早于答题，实际顺序：" + calls, claim < submit);
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+            challengeCallLog = null;
+        }
+    }
+
+    @Test
+    public void claimsPendingPrizeWhenAlreadyAnsweredToday() throws Exception {
+        // 当天已答过（本地有标记）也应补领页面上遗留的奖品，而不是直接跳过整段流程。
+        Map<String, String> environment = environment();
+        SiemensCheckInTask first = new SiemensCheckInTask(environment, baseUrl, true);
+        try {
+            first.run();
+            int submits = challengeSubmits.get();
+            challengePageOneDay = true;
+            challengePageSevenDay = false;
+            SiemensCheckInTask second = new SiemensCheckInTask(environment, baseUrl, true);
+            second.run();
+            // 不重复提交答案，但要把页面上那笔奖领掉。
+            assertEquals(submits, challengeSubmits.get());
+            assertTrue("实际：" + plainText(second), challengeClaims.get() >= 1);
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+        }
+    }
+
+    @Test
+    public void readsPrizeButtonVisibilityFromPage() {
+        String shown = "<button class=\"prime\" style='display: inline-block' id=\"btnPrizeOneDay\">点击领奖</button>";
+        String hidden = "<button class=\"prime\" style=\"display: none;\" id=\"btnPrizeOneDay\">点击领奖</button>";
+
+        // 按钮可见才代表有奖可领；隐藏时不能平白多打一次领奖接口。
+        assertTrue(SiemensChallenge.isPrizeButtonShown(shown, "btnPrizeOneDay"));
+        assertFalse(SiemensChallenge.isPrizeButtonShown(hidden, "btnPrizeOneDay"));
+        assertFalse(SiemensChallenge.isPrizeButtonShown("", "btnPrizeOneDay"));
+        assertFalse(SiemensChallenge.isPrizeButtonShown(shown, "btnPrizeSevenDay"));
+    }
+
+    @Test
+    public void reportsWrongAnswerInsteadOfSuccess() throws Exception {
+        // 正常流程答案取自站点不会错，这里让假站点回 IsCorrect=false，
+        // 验证通知照实写「答题错误」而不是无脑报成功。
+        challengeCorrect = false;
+        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
+        try {
+            task.run();
+
+            // 答案取自站点，正常不会错；真错了也要照实写，不能报「答题正确」。
+            String text = plainText(task);
+            assertTrue("实际：" + text, text.contains("7 天挑战：答题错误"));
+            assertFalse("实际：" + text, text.contains("7 天挑战：答题正确"));
+        } finally {
+            clearRunMarker();
+            clearChallengeMarker();
+        }
     }
 
     private static String plainText(SiemensCheckInTask task) {
@@ -1484,6 +1673,64 @@ public class SiemensCheckInTaskTest {
                 ? "<div class=\"bs_jm\">恭喜您，成功领取，奖励西币 <span>10</span> 枚！</div>"
                 : "<div class=\"title-content\"><b>对不起，您已领取过该奖励！</b></div>",
                 "text/html; charset=utf-8");
+    }
+
+    /**
+     * 模拟 7 天挑战赛答题页：真实页面渲染时把当前登录用户 ID 写进 hiduid，
+     * 程序靠它判断有没有登录，所以假站点也要给一个。
+     */
+    private void handleChallengePage(HttpExchange exchange) throws IOException {
+        String uid = authed(exchange) ? "42" : "";
+        // 按钮可见性模拟「有一笔奖品待领」，用来验证按页面状态补领的分支。
+        String oneDay = challengePageOneDay ? "display: inline-block" : "display: none";
+        String sevenDay = challengePageSevenDay ? "display: inline-block" : "display: none";
+        write(exchange, 200, "<html><body>"
+                + "<input type=\"hidden\" id=\"hiduid\" value=\"" + uid + "\" />"
+                + "<button class=\"prime\" style='" + oneDay + "' id=\"btnPrizeOneDay\">点击领奖</button>"
+                + "<button class=\"prime\" style=\"" + sevenDay + "\" id=\"btnPrizeSevenDay\">点击抽奖</button>"
+                + "</body></html>", "text/html; charset=utf-8");
+    }
+
+    /**
+     * 模拟 7 天挑战赛的题库与答题接口：getquestion 直接返回题目和正确答案，
+     * adduseranswerrecord 按「提交的是不是正确答案」回 IsCorrect。
+     */
+    private void handleChallenge(HttpExchange exchange) throws IOException {
+        String body = readBody(exchange);
+        if (body.contains("type=getquestion")) {
+            write(exchange, 200, "{\"QuestionAndAnswerBankList\":[{\"Id\":" + challengeQuestionId
+                    + ",\"QuestionTitle\":\"S7-1200 支持哪些通信协议？\","
+                    + "\"AnswerA\":\"S7\",\"AnswerB\":\"PROFINET\",\"AnswerC\":\"Modbus\",\"AnswerD\":\"CANopen\","
+                    + "\"TrueAnswer\":\"" + challengeAnswer + "\",\"IsMultiAnswer\":true,"
+                    + "\"TipMsg\":\"《S7-1200 通信》讲解了该问题。\"}],"
+                    + "\"Error\":{\"ErrorCode\":0,\"ErrorDetail\":\"\"}}", "application/json; charset=utf-8");
+            return;
+        }
+        if (body.contains("type=adduseranswerrecord")) {
+            challengeSubmits.incrementAndGet();
+            if (challengeCallLog != null) {
+                challengeCallLog.add("submit");
+            }
+            boolean correct = challengeCorrect && body.contains("answerOptions="
+                    + SiemensCheckInTask.encode(challengeAnswer));            write(exchange, 200, "{\"IsCorrect\":" + correct + ",\"TrueAnswer\":\"" + challengeAnswer + "\","
+                    + "\"TipMsg\":\"讲解\",\"AnswerOptions\":\"A,B\","
+                    + "\"IsCanSevenDayPrize\":false,\"IsCanOneDayPrize\":" + challengeOneDayPrize + ","
+                    + "\"Error\":{\"ErrorCode\":0,\"ErrorDetail\":\"\"}}", "application/json; charset=utf-8");
+            return;
+        }
+        write(exchange, 200, "{\"Error\":{\"ErrorCode\":0,\"ErrorDetail\":\"\"}}", "application/json");
+    }
+
+    private void handleChallengePrize(HttpExchange exchange) throws IOException {
+        String body = readBody(exchange);
+        if (body.contains("InsertSevenDaysOneDayAward")) {
+            challengeClaims.incrementAndGet();
+            if (challengeCallLog != null) {
+                challengeCallLog.add("claim");
+            }
+        }
+        write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AwardType\":0,\"AwardMsg\":null}",
+                "application/json; charset=utf-8");
     }
 
     private void handlePostCommit(HttpExchange exchange) throws IOException {
