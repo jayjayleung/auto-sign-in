@@ -720,20 +720,58 @@ public class SiemensCheckInTask extends CheckInTask {
 
     /**
      * 只在本次确实要做某项任务时才补充对应的内容库，避免白花时间生成用不上的内容。
-     * 三个库共享一份时长预算，谁先用完谁停，剩下的用现场生成兜底。
+     * <p>
+     * 三个库共享一份总预算，并且**按剩余库数均分**：以前是把同一个截止时间依次传下去，
+     * 第一个库的主模型一旦等到 240 秒超时，后面的库就只剩几十秒，直接「预算已用尽」跳过
+     * （11-21 就是这样：ask 等满 240 秒后，story 只剩 25 秒，一条没补上）。
+     * 均分后前一个库再怎么慢，也不会把后面本来能补的库饿死。
      */
     private void refillContentBanks(List<String> pending) {
         ContentBank bank = contentBank();
+        List<String> kinds = new ArrayList<>();
+        if (pending.contains(TASK_ASK) && bank.needsRefill(ContentBank.ASK)) {
+            kinds.add(ContentBank.ASK);
+        }
+        if (pending.contains(TASK_PUBLISH_POST) && bank.needsRefill(ContentBank.POST)) {
+            kinds.add(ContentBank.POST);
+        }
+        if (pending.contains(TASK_PUBLISH_STORY) && storyPostEnabled()
+                && bank.needsRefill(ContentBank.STORY)) {
+            kinds.add(ContentBank.STORY);
+        }
         long deadline = System.currentTimeMillis() + ContentBank.REFILL_BUDGET_MILLIS;
-        if (pending.contains(TASK_ASK)) {
-            bank.refillIfLow(ContentBank.ASK, deadline);
+        for (int i = 0; i < kinds.size(); i++) {
+            long now = System.currentTimeMillis();
+            long left = deadline - now;
+            if (left <= 0) {
+                System.out.println("[西门子] 补库总预算已用尽，剩余 " + (kinds.size() - i) + " 个内容库今天不补");
+                break;
+            }
+            // 剩余时间按剩余库数均分，最后一个库自然拿到剩下的全部。
+            bank.refillIfLow(kinds.get(i), sliceDeadline(now, deadline, kinds.size() - i));
         }
-        if (pending.contains(TASK_PUBLISH_POST)) {
-            bank.refillIfLow(ContentBank.POST, deadline);
+    }
+
+    /**
+     * 按「剩余库数」切出一份截止时间。
+     * <p>
+     * 均分而不是共用同一个截止时间，是为了让前面的库超时不吃掉后面库的全部预算：
+     * 11-21 那次 ask 用主模型等满 4 分钟后，story 只剩 25 秒，直接「预算已用尽」一条没补。
+     *
+     * @param now    当前时间
+     * @param deadline 整轮补库的总截止时间
+     * @param remainingKinds 还包括当前这个在内、待补的库数量
+     */
+    static long sliceDeadline(long now, long deadline, int remainingKinds) {
+        if (remainingKinds <= 1) {
+            return deadline;
         }
-        if (pending.contains(TASK_PUBLISH_STORY) && storyPostEnabled()) {
-            bank.refillIfLow(ContentBank.STORY, deadline);
+        long left = deadline - now;
+        if (left <= 0) {
+            // 预算已经耗尽，返回当前时间让 refillIfLow 立刻停下。
+            return now;
         }
+        return now + Math.max(1, left / remainingKinds);
     }
 
     /**
@@ -1768,6 +1806,11 @@ public class SiemensCheckInTask extends CheckInTask {
 
     HttpResult get(String url) {
         return exchange("GET", url, null, null, null, TIMEOUT_MILLIS);
+    }
+
+    /** 带自定义头的 GET：评论区等接口需要 Referer 指回帖子详情页。 */
+    HttpResult get(String url, Map<String, String> headers) {
+        return exchange("GET", url, null, null, headers, TIMEOUT_MILLIS);
     }
 
     HttpResult post(String url, String body, Map<String, String> headers) {

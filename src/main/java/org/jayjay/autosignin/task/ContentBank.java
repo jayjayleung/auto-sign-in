@@ -149,7 +149,7 @@ final class ContentBank {
                 break;
             }
             int size = Math.min(BATCH_SIZE, needed - added);
-            List<String[]> generated = generate(kind, size, deadline);
+            List<String[]> generated = generate(kind, size, deadline, true);
             if (generated.isEmpty()) {
                 failures++;
                 System.out.println("[西门子] " + kind + " 第 " + (batch + 1) + " 批生成失败");
@@ -176,6 +176,12 @@ final class ContentBank {
             save();
             System.out.println("[西门子] " + kind + " 已补充 " + added + " 条");
         }
+    }
+
+    /** 这个库现在是否低于水位线，调用方据此决定要不要为它分配补库预算。 */
+    boolean needsRefill(String kind) {
+        load();
+        return countReady(kind) < LOW_WATERMARK;
     }
 
     private int countReady(String kind) {
@@ -230,7 +236,7 @@ final class ContentBank {
     /** 调外部 AI 生成 count 条内容，返回 {title, body} 列表；失败返回空列表。 */
     private List<String[]> generate(String kind, int count) {
         // 没有外部截止时间时（库空现场应急生成）给主备两次机会，各自按单批超时封顶。
-        return generate(kind, count, System.currentTimeMillis() + GENERATE_TIMEOUT_MILLIS * 2);
+        return generate(kind, count, System.currentTimeMillis() + GENERATE_TIMEOUT_MILLIS * 2, false);
     }
 
     /**
@@ -238,8 +244,12 @@ final class ContentBank {
      * <p>
      * 补库有共享的总时长预算，这里必须按剩余时间压单次超时：否则主模型等满 240 秒再换备用模型，
      * 一批就能吃掉 8 分钟，三个库串起来会把整轮定时任务拖过预期的运行窗口。
+     *
+     * @param reserveFallback 是否给备用模型预留时间。补库传 true，主模型只用「预算减去备用模型
+     *                        单次超时」这一段，等满后备用模型还有机会补上；现场应急生成不预留，
+     *                        因为那是唯一一次机会，宁可让主模型用满。
      */
-    private List<String[]> generate(String kind, int count, long deadline) {
+    private List<String[]> generate(String kind, int count, long deadline, boolean reserveFallback) {
         load();
         String baseUrl = env("AI_BASE_URL");
         String apiKey = env("AI_API_KEY");
@@ -254,19 +264,28 @@ final class ContentBank {
         if (StrUtil.isNotBlank(existing)) {
             prompt = prompt + "\n\n以下标题已经用过，绝对不要再出现相同或近似的：\n" + existing;
         }
-        int primaryTimeout = timeoutWithin(deadline, GENERATE_TIMEOUT_MILLIS);
-        if (primaryTimeout <= 0) {
+        String fallback = env("AI_FALLBACK_MODEL");
+        boolean hasFallback = StrUtil.isNotBlank(fallback) && !fallback.equals(model);
+        long primaryDeadline = deadline;
+        if (reserveFallback && hasFallback) {
+            // 主模型这一段最多用到「预算 - 备用模型单次上限」，剩下的留给备用模型。
+            long reserve = Math.min(FALLBACK_TIMEOUT_MILLIS, (deadline - System.currentTimeMillis()) / 2);
+            primaryDeadline = deadline - Math.max(0, reserve);
+        }
+        int primaryTimeout = timeoutWithin(primaryDeadline, GENERATE_TIMEOUT_MILLIS);
+        if (primaryTimeout <= 0 && !hasFallback) {
             return new ArrayList<>();
         }
-        List<String[]> result = generateOnce(baseUrl, apiKey, model, prompt, primaryTimeout);
+        List<String[]> result = primaryTimeout <= 0
+                ? new ArrayList<>()
+                : generateOnce(baseUrl, apiKey, model, prompt, primaryTimeout);
         if (!result.isEmpty()) {
             return result;
         }
         // 主模型超时或报错时换备用模型再试一次：三个容器早上同时补库，
         // 主模型排队排在超时边缘时，更轻的备用模型往往能把这批内容补上。
         // 备用模型给的时间短一些，避免一次补库把总预算吃光。
-        String fallback = env("AI_FALLBACK_MODEL");
-        if (StrUtil.isBlank(fallback) || fallback.equals(model)) {
+        if (!hasFallback) {
             return result;
         }
         int fallbackTimeout = timeoutWithin(deadline, FALLBACK_TIMEOUT_MILLIS);

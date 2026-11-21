@@ -508,6 +508,21 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void splitsRefillBudgetAcrossRemainingBanks() {
+        // 三个库共享 5 分钟预算时要均分，不能让第一个库把后面的库饿死。
+        long now = 1_000_000L;
+        long deadline = now + 300_000L;
+        assertEquals(now + 100_000L, SiemensCheckInTask.sliceDeadline(now, deadline, 3));
+        // 第一个库用满自己的配额后，剩下的由后两个库继续均分。
+        long first = now + 100_000L;
+        assertEquals(first + (deadline - first) / 2, SiemensCheckInTask.sliceDeadline(first, deadline, 2));
+        // 最后一个库拿到剩下的全部预算。
+        assertEquals(deadline, SiemensCheckInTask.sliceDeadline(deadline - 1, deadline, 1));
+        // 预算已经耗尽时返回当前时间，调用方据此跳过，不会拿到负数。
+        assertEquals(deadline + 1_000L, SiemensCheckInTask.sliceDeadline(deadline + 1_000L, deadline, 2));
+    }
+
+    @Test
     public void readsQuestionTitleFromCurrentMarkup() {
         // 站点改版后详情页标题在 h1，老页面是 h4.singleLine，两个都要能取到。
         assertEquals("报表脚本解析",
@@ -879,6 +894,52 @@ public class SiemensCheckInTaskTest {
         assertTrue(SiemensForumActions.isQuotaLimited("新注册用户当日主贴数量不能超过2个，请稍候重试！"));
         assertFalse(SiemensForumActions.isQuotaLimited("请选择帖子类别。"));
         assertFalse(SiemensForumActions.isQuotaLimited(null));
+    }
+
+    @Test
+    public void treatsPendingReviewPostAsSubmitted() {
+        // 站点对要人工审核的帖子回 Ret=false，文案却是「发帖成功，帖子将在官方审核后发布」。
+        // 这种是提交成功，不能报失败，也不能计入连续失败熔断。
+        assertTrue(SiemensForumActions.isPendingReview("发帖成功，帖子将在官方审核后发布，谢谢！"));
+        // 真正的拒收不能误判成审核中。
+        assertFalse(SiemensForumActions.isPendingReview("请选择帖子类别。"));
+        assertFalse(SiemensForumActions.isPendingReview("新注册用户当日主贴数量不能超过2个，请稍候重试！"));
+        assertFalse(SiemensForumActions.isPendingReview(null));
+        // 带「审核」但其实是拒收的也要排除，否则任务永远做不完却不再重试。
+        assertFalse(SiemensForumActions.isPendingReview("您的内容未通过审核，请修改后重新提交"));
+        assertFalse(SiemensForumActions.isPendingReview("帖子已被删除"));
+    }
+
+    @Test
+    public void detectsOwnCommentFromCommentListHtml() {
+        // 评论区由前端二次加载，只能查 NewEvaluatePost.aspx 返回的片段。
+        String otherComment = "<div class=\"reply-com\" item_id=\"108445\">"
+                + "<h6><a href=\"./user_disp_other.aspx?u_id=1579302\"><b>隔壁老帆</b></a> ： </h6>"
+                + "<p>老CP做S7单边...</p></div>";
+        assertTrue(SiemensForumActions.commentedByMe(otherComment, "1579302"));
+        assertFalse(SiemensForumActions.commentedByMe(otherComment, "1820833"));
+        // 空响应表示这篇还没人评论。
+        assertFalse(SiemensForumActions.commentedByMe("", "1820833"));
+        assertFalse(SiemensForumActions.commentedByMe(null, "1820833"));
+        // 详情页里那种每层楼都带的 u_id="我自己" 不能参与判断。
+        String detailPage = "<div class=\"reply-part\" id=\"div_Evaluate_2041353\" author='454779' u_id=\"1820833\">";
+        assertFalse(SiemensForumActions.commentedByMe(detailPage, "1820833"));
+    }
+
+    @Test
+    public void picksCommentTargetEvenWhenPostHasReplies() {
+        // 旧判据数详情页里的 u_id 出现次数（等于楼层数），把任何有人回过的帖子都当成
+        // 「我已经评论过」；结果这项任务从上线起一次都没成功过。
+        // 这里固化成：楼层数与我是否评论过无关，只看评论区里有没有我的 uid。
+        String uid = "1820833";
+        String busyPostComments = "<div class=\"reply-com\"><h6><a href=\"./user_disp_other.aspx?u_id=454779\">"
+                + "<b>南通欧创自动化</b></a> ： </h6></div>";
+        assertFalse("别人评论过多层，我仍可评论",
+                SiemensForumActions.commentedByMe(busyPostComments, uid));
+        String myComment = busyPostComments + "<div class=\"reply-com\"><h6><a href=\"./user_disp_other.aspx?u_id="
+                + uid + "\"><b>呱太</b></a> ： </h6></div>";
+        assertTrue("评论区里有我的 uid 就不能重复评论",
+                SiemensForumActions.commentedByMe(myComment, uid));
     }
 
     @Test

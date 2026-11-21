@@ -45,6 +45,18 @@ final class SiemensForumActions {
     private static final Pattern NOTICE_LINK = Pattern.compile(
             "MyMsgDetail\\.aspx\\?noticeId=(\\d+)\"[^>]*>(.{0,600}?)</div>\\s*<div class=\"fr right\">",
             Pattern.DOTALL);
+    /**
+     * 评论区里每条评论的作者链接。评论由前端二次加载，详情页源码里没有，
+     * 只能从 {@code NewEvaluatePost.aspx} 返回的片段里取。
+     */
+    private static final Pattern COMMENT_AUTHOR = Pattern.compile("user_disp_other\\.aspx\\?u_id=(\\d+)");
+    /**
+     * 带「审核」二字但其实是拒收的文案。审核中与拒收都含「审核」，
+     * 只能靠这些否定词区分，否则会把拒收当成功、任务永远做不完却不再重试。
+     */
+    private static final String[] REVIEW_REJECTED_MARKERS = {
+            "未通过", "不通过", "没通过", "已被删除", "已删除", "违规", "拒绝",
+    };
     /** 收藏帖子时最多往前看几条，避免最新帖已收藏时无解。 */
     private static final int FAVORITE_CANDIDATES = 6;
     /**
@@ -98,6 +110,11 @@ final class SiemensForumActions {
     private static final Pattern SORT_OPTION = Pattern.compile("<option\\s+value=\"(\\d+)\"\\s*>([^<]*)</option>");
 
     private final SiemensCheckInTask task;
+    /**
+     * 本次提交被站点转成「审核中」（{@code Ret=false} + 文案里带「审核」）。
+     * 这类帖子已经进了审核队列，不算失败，日志也不能再打「发帖失败」。
+     */
+    private boolean pendingReview;
 
     SiemensForumActions(SiemensCheckInTask task) {
         this.task = task;
@@ -230,16 +247,17 @@ final class SiemensForumActions {
 
     /**
      * 评论帖子。跳过自己和已经评论过的帖子，否则站点直接回 false。
-     * 和回帖一样，只评论主题明确的技术帖：详情页已经在抓，顺手把标题和正文取出来判主题，
-     * 不额外增加请求。
+     * 和回帖一样，只评论主题明确的技术帖：详情页已经在抓，顺手把标题和正文取出来判主题。
+     * <p>
+     * 「评论过没有」必须查评论区接口，不能数详情页里的 u_id：详情页上每层楼的
+     * {@code <div class="reply-part" ... u_id="当前登录者">} 都是**当前登录人**自己的 ID，
+     * 出现次数等于楼层数，和「我评论没评论」毫无关系（旧判据要求 ≤1，
+     * 于是任何有人回过的帖子都被当成已评论，这项任务长期一次都没做成过）。
      */
     void commentPost() {
         String uid = task.currentUserId();
         List<Topic> open = new ArrayList<>();
         for (String candidate : latestForumPostIds(TOPIC_CANDIDATES)) {
-            if (candidate.startsWith(uid + "-")) {
-                continue;
-            }
             int split = candidate.indexOf('-');
             String articleId = candidate.substring(0, split);
             String boardId = candidate.substring(split + 1);
@@ -247,13 +265,14 @@ final class SiemensForumActions {
             if (topic == null || !isTechnicalTopic(topic)) {
                 continue;
             }
-            Matcher author = Pattern.compile("user_disp\\.aspx\\?u_id=(\\d+)").matcher(topic.html);
-            String authorId = author.find() ? author.group(1) : "";
-            long mine = Pattern.compile("u_id=\"" + uid + "\"").matcher(topic.html).results().count();
-            // 别人的帖子、且我在页面上只出现 1 次（说明还没评论过）。
-            if (!authorId.equals(uid) && mine <= 1) {
-                open.add(topic);
+            // 自己的帖子不能评论，站点会拒；作者为空（页面结构变了）时宁可跳过也不冒险。
+            if (StrUtil.isBlank(topic.authorId) || uid.equals(topic.authorId)) {
+                continue;
             }
+            if (commentedByMe(articleId, boardId, uid)) {
+                continue;
+            }
+            open.add(topic);
         }
         if (open.isEmpty()) {
             // 同样不是失败：没有可评论的技术帖就跳过，不影响其它任务。
@@ -284,8 +303,51 @@ final class SiemensForumActions {
         System.out.println("[西门子] 评论帖子：" + SiemensCheckInTask.abbreviate(response));
         if (!"true".equals(response)) {
             // false 表示站点认为已经评论过，这种也不算成功。
+            // 这里只在响应明确失败时判失败：站点任务状态有延迟（发帖要等审核才落库），
+            // 立刻回读任务状态会把刚做成功的事情误判成失败。
             task.markTaskFailed(true);
         }
+    }
+
+    /**
+     * 我是否已经评论过这篇帖子。
+     * <p>
+     * 评论是前端二次加载的，帖子详情页源码里没有评论内容，只能查专区自己的接口：
+     * {@code /club/bbs/AjaxApi/NewEvaluatePost.aspx} 返回评论区 HTML，每条评论带
+     * {@code user_disp_other.aspx?u_id=评论者}。返回空说明还没人评论。
+     * <p>
+     * 接口失败（非 200）时按「已评论」处理：宁可今天少评一篇，也不要重复提交触发风控。
+     */
+    private boolean commentedByMe(String articleId, String boardId, String uid) {
+        String url = task.supportBaseUrl() + "/club/bbs/AjaxApi/NewEvaluatePost.aspx"
+                + "?aid=" + articleId + "&bid=" + boardId + "&pageIndex=1&lock1=True";
+        String referer = task.supportBaseUrl() + "/club/bbs/post_" + articleId + "_" + boardId + "_0_1.html";
+        SiemensCheckInTask.HttpResult result;
+        try {
+            result = task.get(url, task.supportHeaders(referer));
+        } catch (RuntimeException e) {
+            System.out.println("[西门子] 读取评论区失败，跳过帖子 " + articleId + "：" + e.getMessage());
+            return true;
+        }
+        if (result.status != 200) {
+            System.out.println("[西门子] 读取评论区返回 HTTP " + result.status + "，跳过帖子 " + articleId);
+            return true;
+        }
+        return commentedByMe(result.body, uid);
+    }
+
+    /** 从评论区 HTML 里判断有没有自己的评论，单独拆出来方便测试。 */
+    static boolean commentedByMe(String commentHtml, String uid) {
+        if (StrUtil.isBlank(commentHtml) || StrUtil.isBlank(uid)) {
+            return false;
+        }
+        Matcher matcher = COMMENT_AUTHOR.matcher(commentHtml);
+        while (matcher.find()) {
+            if (uid.equals(matcher.group(1))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 发一条探讨帖。 */
@@ -353,7 +415,8 @@ final class SiemensForumActions {
         JSONObject request = buildRequest(articleId, boardId, type, title, content, sort);
         boolean ok = commit(request);
         if (ok) {
-            System.out.println("[西门子] 发帖成功");
+            // 审核态已经进了审核队列，和即时通过分开说，免得以为帖子没发出去。
+            System.out.println(pendingReview ? "[西门子] 发帖成功，等待官方审核" : "[西门子] 发帖成功");
         } else if (!task.wasTaskSkipped()) {
             // 额度受限已在 commit 里打过日志，这里不再重复报「失败」。
             System.out.println("[西门子] 发帖失败");
@@ -403,6 +466,7 @@ final class SiemensForumActions {
 
     /** 提交帖子，返回站点是否接受。 */
     private boolean commit(JSONObject request) {
+        pendingReview = false;
         String url = task.supportBaseUrl() + "/club/bbs/AjaxApi/PostCommitAjax.ashx";
         SiemensCheckInTask.HttpResult result = task.post(url, "request=" + SiemensCheckInTask.encode(request.toString()),
                 task.supportHeaders(url));
@@ -413,6 +477,12 @@ final class SiemensForumActions {
         if (!ok) {
             String message = head == null
                     ? SiemensCheckInTask.abbreviate(result.body) : head.getStr("Message");
+            // 站点对需要人工审核的帖子会回 Ret=false，文案却是「发帖成功，帖子将在官方审核后发布」。
+            // 帖子确实进了审核队列、之后任务状态也会变成已完成，按失败处理会误报并计入熔断。
+            if (isPendingReview(message)) {
+                pendingReview = true;
+                return true;
+            }
             System.out.println("[西门子] 发帖被拒绝：" + message);
             // 新注册账号每天有主贴数上限，这不是程序问题，也不该触发风控熔断。
             if (isQuotaLimited(message)) {
@@ -427,6 +497,25 @@ final class SiemensForumActions {
     /** 站点对当日主贴数量超限的提示，属于账号限制而不是程序失败。 */
     static boolean isQuotaLimited(String message) {
         return message != null && message.contains("主贴数量");
+    }
+
+    /**
+     * 站点是否把帖子转成了「审核中」而不是拒收。
+     * <p>
+     * 只有 {@code Head.Ret=false} 时才会带上这类提示。真正的拒收文案是
+     * 「请选择帖子类别」「主贴数量超限」「内容未通过审核」这类，必须排除掉，
+     * 否则会把拒收当成提交成功，任务状态永远完不成却不再重试。
+     */
+    static boolean isPendingReview(String message) {
+        if (message == null || !message.contains("审核")) {
+            return false;
+        }
+        for (String rejected : REVIEW_REJECTED_MARKERS) {
+            if (message.contains(rejected)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 从「最新发帖」列表取一条帖子，返回 articleId-boardId。 */
