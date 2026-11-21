@@ -502,6 +502,38 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void stripsCitationsFromMallAiAnswer() {
+        // 商城 AI 带知识库检索，答案末尾会跟「本回复知识来源」和 [1][2] 角标，
+        // 直接发到论坛会明显像机器生成，必须先清掉。
+        String raw = "S7-200 SMART 不支持 GRAPH，复杂顺控建议用 SCL 写状态机 [1] [2]。"
+                + "本回复知识来源：西门子 AI 小西（西门子技术支持中心网站)https://example.com";
+        assertEquals("S7-200 SMART 不支持 GRAPH，复杂顺控建议用 SCL 写状态机。",
+                SiemensCheckInTask.stripAiCitations(raw));
+
+        // 全角角标也要清。
+        assertEquals("答案在这里。", SiemensCheckInTask.stripAiCitations("答案在这里［1］。"));
+        // 没有引用痕迹的正文要原样保留，不能误删正常内容。
+        assertEquals("先查物理层，再看诊断缓冲区。",
+                SiemensCheckInTask.stripAiCitations("先查物理层，再看诊断缓冲区。"));
+        // 只有引用、清完为空时返回空串，让调用方按没拿到内容处理。
+        assertEquals("", SiemensCheckInTask.stripAiCitations("本回复知识来源：西门子 AI 小西"));
+        assertEquals(null, SiemensCheckInTask.stripAiCitations(null));
+    }
+
+    @Test
+    public void removesCitationSourceUrlLine() {
+        // 来源尾注后面常跟一行孤立的官网链接，也要整行去掉。
+        String raw = "建议先确认设备名和 IP 是否重复 [1]。\n本回复知识来源：西门子 AI 小西\n"
+                + "https://www.ad.siemens.com.cn/aixiaoxi/";
+        assertEquals("建议先确认设备名和 IP 是否重复。", SiemensCheckInTask.stripAiCitations(raw));
+        // 正文中间的正常链接行不能被误删（这里只删「整行只有网址」的行，
+        // 但正文里带说明文字的链接行要保留）。
+        String withText = "参考这个页面 https://www.ad.siemens.com.cn/a.html 的说明 [2]。";
+        assertEquals("参考这个页面 https://www.ad.siemens.com.cn/a.html 的说明。",
+                SiemensCheckInTask.stripAiCitations(withText));
+    }
+
+    @Test
     public void favoriteAlwaysCarriesTag() {
         // 站点要求收藏必须带标签，不带标签只会原样返回表单、不报错也不生效。
         assertFalse(SiemensAnswerActions.favoriteTag().trim().isEmpty());

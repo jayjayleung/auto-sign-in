@@ -1577,7 +1577,36 @@ public class SiemensCheckInTask extends CheckInTask {
             System.out.println("[西门子] AI 助手没有返回内容：" + body.getStr("message"));
             return null;
         }
-        return StrUtil.trim(answer);
+        // 商城 AI 是带知识库检索的问答助手，答案尾部会附「本回复知识来源：西门子 AI 小西…」
+        // 和一串 [1] [2] 引用角标。直接发到论坛会明显像机器生成的引用格式，先清掉。
+        String cleaned = stripAiCitations(answer);
+        return StrUtil.isBlank(cleaned) ? null : cleaned;
+    }
+
+    /**
+     * 去掉商城 AI 附带的引用痕迹：RAG 角标和「本回复知识来源」尾注。
+     * <p>
+     * 只在这条兜底链路上出现（外部网关返回的是纯正文），但清一次成本极低，
+     * 清完为空时返回空串让调用方按「没拿到内容」处理，避免把空白发出去。
+     */
+    static String stripAiCitations(String text) {
+        if (StrUtil.isBlank(text)) {
+            return text;
+        }
+        String cleaned = text;
+        // 「本回复知识来源：…」整段到尾，可能还带网址。
+        cleaned = cleaned.replaceAll("(?m)^\\s*本回复知识来源[:：].*$", "");
+        cleaned = cleaned.replaceAll("(?s)\\s*本回复知识来源[:：].*$", "");
+        // 行内散落的角标：[1]、[12]、[1][2] 以及全角版本。
+        cleaned = cleaned.replaceAll("[\\[［]\\s*\\d+\\s*[\\]］]", "");
+        // 只剩网址的行（引用来源链接）整行去掉，正文里的链接不受影响。
+        cleaned = cleaned.replaceAll("(?m)^\\s*(?:https?://|www\\.)\\S*\\s*$", "");
+        // 角标删掉后常在标点前留下多余空格，中文里不该有。
+        cleaned = cleaned.replaceAll("[ \\t]+(?=[。，、；：？！）】》])", "");
+        cleaned = cleaned.replaceAll("(?<=[（【《])[ \\t]+", "");
+        // 清理后可能留下连续空行和行尾空格。
+        cleaned = cleaned.replaceAll("[ \\t]+\\n", "\n").replaceAll("\\n{3,}", "\n\n");
+        return StrUtil.trim(cleaned).replaceAll("[ \\t]{2,}", " ");
     }
 
     /** 用商城 client_id 走 ONEID 密码登录，拿到调用 AI 用的 access_token。 */
