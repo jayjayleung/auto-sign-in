@@ -47,21 +47,37 @@ final class ContentBank {
     static final int FIRST_FILL = 8;
     /** 每批生成条数：批次太大推理模型容易超时，5 条实测约 25-40 秒。 */
     private static final int BATCH_SIZE = 5;
+    /**
+     * 故事帖单独用更小的批次。
+     * 它每条约 300 字正文，是三类里输出最长的；同样 5 条要写一千多字，
+     * 实测推理模型在网关拥塞时 240 秒都出不来（11-23 主账号整整一批全废、库存归零）。
+     * 降到 3 条后单批输出减少四成，实测 7-41 秒就能返回。
+     */
+    private static final int STORY_BATCH_SIZE = 3;
     /** 补货最多尝试几批：补满 10 条只需 2 批，多留几批应对偶发失败。 */
     private static final int MAX_BATCHES = 4;
-    /** 单批生成超时。推理模型较慢，给足余量但要能在 cron 任务里跑完。 */
-    private static final int GENERATE_TIMEOUT_MILLIS = 240_000;
+    /** 单批生成超时上限。推理模型较慢，但一批等太久会把预算吃光，2.5 分钟够 3-5 条。 */
+    private static final int GENERATE_TIMEOUT_MILLIS = 150_000;
     /**
      * 主模型失败后备用模型的单次超时。
-     * 备用模型本来就是拿来抢时间的，不必再给满 4 分钟，否则一次补库就会吃掉大半预算。
+     * 备用模型本来就是拿来抢时间的，给 1 分钟；再长一批就会占掉本可以留给下一批的预算。
      */
-    private static final int FALLBACK_TIMEOUT_MILLIS = 90_000;
+    private static final int FALLBACK_TIMEOUT_MILLIS = 60_000;
+    /**
+     * 单批生成最多占用的剩余预算比例（百分比）。
+     * 必须留出一部分给下一批：以前一批可以用满整份预算，主备两个模型都超时后
+     * 当天库存直接归零（11-23 主账号 story 就是这样一条没补上）。
+     */
+    private static final int BATCH_BUDGET_PERCENT = 60;
+    /** 单批窗口的下限：低于这个值连一次请求都发不完整，不如直接收手留给下一轮。 */
+    private static final int MIN_BATCH_MILLIS = 45_000;
     /**
      * 整轮运行里补库的总时长上限，三个库共享这一份预算。
-     * 补库现在排在所有每日任务之后，这一份就是整轮运行最后可能多出来的时间；
-     * 5 分钟足够补完 10 条库存的两批生成，超出说明文案接口有问题，不值得继续等。
+     * 补库排在所有每日任务之后，这一份就是整轮运行最后可能多出来的时间；
+     * 6 分钟够 story 这种长文本库跑两批（单批主模型 150 秒 + 备用 60 秒），
+     * 超出说明文案接口有问题，不值得继续等。
      */
-    static final long REFILL_BUDGET_MILLIS = 5 * 60_000L;
+    static final long REFILL_BUDGET_MILLIS = 6 * 60_000L;
 
     /** 业务时区固定北京时间：容器和 GitHub Actions 的 TZ 不同，日期口径必须显式指定。 */
     private static final java.time.ZoneId SHANGHAI = java.time.ZoneId.of("Asia/Shanghai");
@@ -148,7 +164,7 @@ final class ContentBank {
                         + (ready + added) + " 条");
                 break;
             }
-            int size = Math.min(BATCH_SIZE, needed - added);
+            int size = Math.min(batchSize(kind), needed - added);
             List<String[]> generated = generate(kind, size, deadline, true);
             if (generated.isEmpty()) {
                 failures++;
@@ -182,6 +198,11 @@ final class ContentBank {
     boolean needsRefill(String kind) {
         load();
         return countReady(kind) < LOW_WATERMARK;
+    }
+
+    /** 这个类型每批生成几条：故事帖正文最长，单独用更小的批次防止整批超时。 */
+    static int batchSize(String kind) {
+        return STORY.equals(kind) ? STORY_BATCH_SIZE : BATCH_SIZE;
     }
 
     private int countReady(String kind) {
@@ -244,6 +265,11 @@ final class ContentBank {
      * <p>
      * 补库有共享的总时长预算，这里必须按剩余时间压单次超时：否则主模型等满 240 秒再换备用模型，
      * 一批就能吃掉 8 分钟，三个库串起来会把整轮定时任务拖过预期的运行窗口。
+     * <p>
+     * 单批还会再压到剩余预算的 {@link #BATCH_BUDGET_PERCENT}%，给后面的批次留机会：
+     * 11-23 主账号 story 库为空，唯一一批主模型 240 秒超时 + 备用模型 90 秒超时，
+     * 把整份预算一次吃光，最终一条都没补上。压到六成后，即使这批全废，
+     * 后面仍能按越来越短的窗口继续尝试，至少能补进一部分。
      *
      * @param reserveFallback 是否给备用模型预留时间。补库传 true，主模型只用「预算减去备用模型
      *                        单次超时」这一段，等满后备用模型还有机会补上；现场应急生成不预留，
@@ -258,6 +284,8 @@ final class ContentBank {
             System.out.println("[西门子] 未配置 AI_BASE_URL/AI_API_KEY/AI_MODEL，无法生成内容");
             return new ArrayList<>();
         }
+        // 补库时把这一批的时间窗压到剩余预算的一部分，失败也不会让后面的批次没有时间。
+        long batchDeadline = reserveFallback ? batchDeadline(System.currentTimeMillis(), deadline) : deadline;
         String prompt = buildPrompt(kind, count);
         // 把已用过的标题喂给模型，避免库空时反复生成同一条。
         String existing = existingTitles(kind);
@@ -266,11 +294,12 @@ final class ContentBank {
         }
         String fallback = env("AI_FALLBACK_MODEL");
         boolean hasFallback = StrUtil.isNotBlank(fallback) && !fallback.equals(model);
-        long primaryDeadline = deadline;
+        long primaryDeadline = batchDeadline;
         if (reserveFallback && hasFallback) {
-            // 主模型这一段最多用到「预算 - 备用模型单次上限」，剩下的留给备用模型。
-            long reserve = Math.min(FALLBACK_TIMEOUT_MILLIS, (deadline - System.currentTimeMillis()) / 2);
-            primaryDeadline = deadline - Math.max(0, reserve);
+            // 主模型这一段最多用到「本批窗口 - 备用模型单次上限」，剩下的留给备用模型。
+            long reserve = Math.min(FALLBACK_TIMEOUT_MILLIS,
+                    (batchDeadline - System.currentTimeMillis()) / 2);
+            primaryDeadline = batchDeadline - Math.max(0, reserve);
         }
         int primaryTimeout = timeoutWithin(primaryDeadline, GENERATE_TIMEOUT_MILLIS);
         if (primaryTimeout <= 0 && !hasFallback) {
@@ -288,13 +317,27 @@ final class ContentBank {
         if (!hasFallback) {
             return result;
         }
-        int fallbackTimeout = timeoutWithin(deadline, FALLBACK_TIMEOUT_MILLIS);
+        int fallbackTimeout = timeoutWithin(batchDeadline, FALLBACK_TIMEOUT_MILLIS);
         if (fallbackTimeout <= 0) {
             System.out.println("[西门子] 补库预算已用尽，不再用备用模型重试");
             return result;
         }
         System.out.println("[西门子] 主模型生成失败，改用备用模型 " + fallback + " 重试");
         return generateOnce(baseUrl, apiKey, fallback, prompt, fallbackTimeout);
+    }
+
+    /**
+     * 按剩余预算切出这一批的截止时间：最多占剩余时间的 {@link #BATCH_BUDGET_PERCENT}%，
+     * 但不低于 {@link #MIN_BATCH_MILLIS}（受剩余时间封顶），保证短窗口下也能发出一次请求。
+     */
+    static long batchDeadline(long now, long deadline) {
+        long remaining = deadline - now;
+        if (remaining <= 0) {
+            return now;
+        }
+        long slice = remaining * BATCH_BUDGET_PERCENT / 100;
+        long floor = Math.min(remaining, MIN_BATCH_MILLIS);
+        return now + Math.max(floor, Math.min(remaining, slice));
     }
 
     /** 把单次超时压到不超过剩余预算，返回毫秒；剩余不足 1 秒时返回 0。 */

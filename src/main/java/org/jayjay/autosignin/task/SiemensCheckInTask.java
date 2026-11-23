@@ -463,8 +463,6 @@ public class SiemensCheckInTask extends CheckInTask {
         // SIEMENS_DAILY_TASKS=false 时只签到不动它；失败也不影响签到结果。
         if (dailyTasksEnabled()) {
             answerDailyChallenge();
-            // 25 周年庆的分享抽奖每人一次、奖品含 25 西币，实测有账号漏抽，一起补上。
-            drawAnniversaryPrize();
         }
 
         // 任务都做完后再读一次余额，用差额体现今天实际增加了多少西币。
@@ -496,24 +494,6 @@ public class SiemensCheckInTask extends CheckInTask {
             }
         } catch (Exception e) {
             System.out.println("[西门子] 领取消息西币异常：" + e.getMessage());
-        }
-    }
-
-    /**
-     * 25 周年庆的分享抽奖，每人限一次，奖品含 25 西币。
-     * 实测三个账号里有一个从没抽过（AlreadyDrawn=false），属于纯漏掉的收益。
-     * 抽过、活动结束、未登录都只记日志，不影响签到结果。
-     */
-    private void drawAnniversaryPrize() {
-        try {
-            SiemensAnniversary25.Result result = new SiemensAnniversary25(this).run();
-            if (result.drawn) {
-                addMessage("25 周年抽奖：", StrUtil.blankToDefault(result.message, "已抽奖"));
-            } else if (StrUtil.isNotBlank(result.skipReason)) {
-                System.out.println("[西门子] 25 周年抽奖跳过：" + result.skipReason);
-            }
-        } catch (Exception e) {
-            System.out.println("[西门子] 25 周年抽奖异常：" + e.getMessage());
         }
     }
 
@@ -740,6 +720,12 @@ public class SiemensCheckInTask extends CheckInTask {
             kinds.add(ContentBank.STORY);
         }
         long deadline = System.currentTimeMillis() + ContentBank.REFILL_BUDGET_MILLIS;
+        // 按「类型权重」切预算：故事帖正文最长、最容易整批超时，给它双份，
+        // 否则 ask/post 先跑完后它只剩零头，一批都发不完（11-23 主账号就是这样归零的）。
+        int remainingWeight = 0;
+        for (String kind : kinds) {
+            remainingWeight += refillWeight(kind);
+        }
         for (int i = 0; i < kinds.size(); i++) {
             long now = System.currentTimeMillis();
             long left = deadline - now;
@@ -747,16 +733,46 @@ public class SiemensCheckInTask extends CheckInTask {
                 System.out.println("[西门子] 补库总预算已用尽，剩余 " + (kinds.size() - i) + " 个内容库今天不补");
                 break;
             }
-            // 剩余时间按剩余库数均分，最后一个库自然拿到剩下的全部。
-            bank.refillIfLow(kinds.get(i), sliceDeadline(now, deadline, kinds.size() - i));
+            String kind = kinds.get(i);
+            int weight = refillWeight(kind);
+            // 最后一个库自然拿到剩下的全部预算。
+            bank.refillIfLow(kind, sliceDeadlineByWeight(now, deadline, weight, remainingWeight));
+            remainingWeight -= weight;
         }
     }
 
+    /** 补库预算权重：故事帖正文最长，给双份；其它类型各一份。 */
+    static int refillWeight(String kind) {
+        return ContentBank.STORY.equals(kind) ? 2 : 1;
+    }
+
     /**
-     * 按「剩余库数」切出一份截止时间。
+     * 按权重切出当前类型可用的截止时间。
      * <p>
-     * 均分而不是共用同一个截止时间，是为了让前面的库超时不吃掉后面库的全部预算：
-     * 11-21 那次 ask 用主模型等满 4 分钟后，story 只剩 25 秒，直接「预算已用尽」一条没补。
+     * 与均分的 {@link #sliceDeadline} 相比，这里允许某些库拿更大的份额：
+     * 权重越大拿到的预算越多，最后一个库直接拿到剩余全部。
+     *
+     * @param now            当前时间
+     * @param deadline       整轮补库的总截止时间
+     * @param weight         当前类型的权重
+     * @param remainingWeight 还包括当前这个在内、待补类型的权重合计
+     */
+    static long sliceDeadlineByWeight(long now, long deadline, int weight, int remainingWeight) {
+        if (remainingWeight <= weight) {
+            return deadline;
+        }
+        long left = deadline - now;
+        if (left <= 0) {
+            // 预算已经耗尽，返回当前时间让 refillIfLow 立刻停下。
+            return now;
+        }
+        return now + Math.max(1, left * weight / remainingWeight);
+    }
+
+    /**
+     * 按「剩余库数」均分出一份截止时间，等价于每个库权重都为 1 的
+     * {@link #sliceDeadlineByWeight}。保留这个方法是因为默认均分仍是大多数场景的语义，
+     * 调用方不需要关心权重细节。
      *
      * @param now    当前时间
      * @param deadline 整轮补库的总截止时间
@@ -766,12 +782,7 @@ public class SiemensCheckInTask extends CheckInTask {
         if (remainingKinds <= 1) {
             return deadline;
         }
-        long left = deadline - now;
-        if (left <= 0) {
-            // 预算已经耗尽，返回当前时间让 refillIfLow 立刻停下。
-            return now;
-        }
-        return now + Math.max(1, left / remainingKinds);
+        return sliceDeadlineByWeight(now, deadline, 1, remainingKinds);
     }
 
     /**

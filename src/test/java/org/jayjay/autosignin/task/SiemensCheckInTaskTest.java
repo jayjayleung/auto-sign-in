@@ -70,11 +70,6 @@ public class SiemensCheckInTaskTest {
     private volatile boolean challengePageSevenDay;
     /** 记录接口调用顺序，用于验证领奖排在答题之前。 */
     private volatile java.util.List<String> challengeCallLog;
-    /** 25 周年抽奖是否已经抽过。 */
-    private volatile boolean anniversaryDrawn;
-    /** 25 周年活动是否已结束（页面出现「活动已结束」）。 */
-    private volatile boolean anniversaryEnded;
-    private final AtomicInteger anniversaryDraws = new AtomicInteger();
     private final AtomicInteger challengeSubmits = new AtomicInteger();
     private final AtomicInteger challengeClaims = new AtomicInteger();
 
@@ -105,9 +100,6 @@ public class SiemensCheckInTaskTest {
         challengeSubmits.set(0);
         challengeClaims.set(0);
         challengeCallLog = null;
-        anniversaryDrawn = false;
-        anniversaryEnded = false;
-        anniversaryDraws.set(0);
         clearChallengeMarker();
         clearCoinNotices();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -123,8 +115,6 @@ public class SiemensCheckInTaskTest {
         server.createContext("/event/AjaxAPI/SevenDaysChallenge.ashx", this::handleChallenge);
         server.createContext("/event/AjaxAPI/SevenDaysPrize.ashx", this::handleChallengePrize);
         server.createContext("/Event/7DaysChallenge/Question.aspx", this::handleChallengePage);
-        server.createContext("/event/Siemens25Anniversary/index.aspx", this::handleAnniversaryPage);
-        server.createContext("/event/AjaxAPI/Siemens25.ashx", this::handleAnniversaryApi);
         server.createContext("/club/bbs/AjaxApi/PostCommitAjax.ashx", this::handlePostCommit);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
@@ -1538,51 +1528,50 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
-    public void drawsAnniversaryPrizeWhenNotDrawnYet() throws Exception {
-        anniversaryDrawn = false;
-        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
-        try {
-            task.run();
-            assertEquals(1, anniversaryDraws.get());
-            assertTrue("实际：" + plainText(task), plainText(task).contains("25 周年抽奖：恭喜您抽中"));
-        } finally {
-            clearRunMarker();
-            clearChallengeMarker();
-        }
+    public void storyUsesSmallerBatchThanOtherKinds() {
+        // 故事帖正文最长，每批条数要更小，否则网关慢时整批一起超时。
+        assertTrue("故事帖批次必须小于其它类型",
+                ContentBank.batchSize(ContentBank.STORY) < ContentBank.batchSize(ContentBank.POST));
+        assertEquals(ContentBank.batchSize(ContentBank.POST), ContentBank.batchSize(ContentBank.ASK));
     }
 
     @Test
-    public void skipsAnniversaryDrawWhenAlreadyDrawn() throws Exception {
-        anniversaryDrawn = true;
-        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
-        try {
-            task.run();
+    public void batchDeadlineLeavesBudgetForLaterBatches() {
+        // 单批最多用掉剩余预算的一部分，一批全废也不能把后面的批次饿死。
+        long now = 10_000_000L;
+        long deadline = now + 300_000L;
+        long first = ContentBank.batchDeadline(now, deadline);
+        assertTrue("单批不能吃掉整份预算", first < deadline);
+        assertTrue("单批要留出足够给下一批", deadline - first >= 100_000L);
 
-            // 每人只能抽一次，已经抽过就不该再打抽奖接口。
-            assertEquals(0, anniversaryDraws.get());
-            assertFalse(plainText(task).contains("25 周年抽奖"));
-        } finally {
-            clearRunMarker();
-            clearChallengeMarker();
-        }
+        // 预算很短时仍有下限，保证能发出一次请求。
+        long tight = ContentBank.batchDeadline(now, now + 10_000L);
+        assertTrue(tight > now);
+        assertTrue(tight <= now + 10_000L);
+
+        // 预算已经用尽时返回当前时间，调用方据此停下。
+        assertEquals(now, ContentBank.batchDeadline(now, now - 1L));
     }
 
     @Test
-    public void skipsAnniversaryDrawAfterEventEnded() throws Exception {
-        anniversaryEnded = true;
-        anniversaryDrawn = false;
-        SiemensCheckInTask task = new SiemensCheckInTask(environment(), baseUrl, true);
-        try {
-            task.run();
+    public void storyGetsDoubleRefillBudget() {
+        // 故事帖正文最长，补库预算要双份，否则 ask/post 跑完它只剩零头。
+        assertEquals(2, SiemensCheckInTask.refillWeight(ContentBank.STORY));
+        assertEquals(1, SiemensCheckInTask.refillWeight(ContentBank.ASK));
+        assertEquals(1, SiemensCheckInTask.refillWeight(ContentBank.POST));
 
-            // 活动结束后页面有明确文案，不该再去打接口。
-            assertEquals(0, anniversaryDraws.get());
-            assertFalse(plainText(task).contains("25 周年抽奖"));
-        } finally {
-            clearRunMarker();
-            clearChallengeMarker();
-            anniversaryEnded = false;
-        }
+        // ask + post + story：总权重 4，story 拿一半。
+        long now = 1_000_000L;
+        long deadline = now + 400_000L;
+        assertEquals(now + 100_000L,
+                SiemensCheckInTask.sliceDeadlineByWeight(now, deadline, 1, 4));
+        // ask 用完后，剩余权重 3，post 仍拿 1/3。
+        long afterAsk = now + 100_000L;
+        assertEquals(afterAsk + 100_000L,
+                SiemensCheckInTask.sliceDeadlineByWeight(afterAsk, deadline, 1, 3));
+        // story 是最后一个，拿到剩余全部。
+        long afterPost = afterAsk + 100_000L;
+        assertEquals(deadline, SiemensCheckInTask.sliceDeadlineByWeight(afterPost, deadline, 2, 2));
     }
 
     @Test
@@ -1840,33 +1829,6 @@ public class SiemensCheckInTaskTest {
         }
         write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AwardType\":0,\"AwardMsg\":null}",
                 "application/json; charset=utf-8");
-    }
-
-    /** 模拟 25 周年活动页：把用户 ID 写进脚本，活动结束后出现对应文案。 */
-    private void handleAnniversaryPage(HttpExchange exchange) throws IOException {
-        String uid = authed(exchange) ? "42" : "0";
-        String ended = anniversaryEnded ? "<p>活动已结束</p>" : "";
-        write(exchange, 200, "<html><body>" + ended
-                + "<script>var s25UserId = Number('" + uid + "');</script>"
-                + "</body></html>", "text/html; charset=utf-8");
-    }
-
-    /** 模拟 25 周年抽奖接口：getstatus 回报是否抽过，shareanddraw 抽一次。 */
-    private void handleAnniversaryApi(HttpExchange exchange) throws IOException {
-        String body = readBody(exchange);
-        if (body.contains("type=getstatus")) {
-            write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AlreadyDrawn\":"
-                    + anniversaryDrawn + ",\"AwardType\":0,\"AwardMsg\":null}", "application/json");
-            return;
-        }
-        if (body.contains("type=shareanddraw")) {
-            anniversaryDraws.incrementAndGet();
-            write(exchange, 200, "{\"ErrorCode\":0,\"ErrorDetail\":null,\"AlreadyDrawn\":true,"
-                    + "\"AwardType\":9,\"AwardMsg\":\"恭喜您抽中“25西币”，西币奖励已到账，请及时查看！\"}",
-                    "application/json");
-            return;
-        }
-        write(exchange, 200, "{\"ErrorCode\":0}", "application/json");
     }
 
     private void handlePostCommit(HttpExchange exchange) throws IOException {
