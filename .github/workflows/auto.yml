@@ -35,6 +35,7 @@ env:
   WATCHA_REVIEW_REMINDER: ${{ secrets.WATCHA_REVIEW_REMINDER }}
   SIEMENS_USERNAME: ${{ secrets.SIEMENS_USERNAME }}
   SIEMENS_PASSWORD: ${{ secrets.SIEMENS_PASSWORD }}
+  SIEMENS_ENABLED: ${{ secrets.SIEMENS_ENABLED }}
   AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
   AI_API_KEY: ${{ secrets.AI_API_KEY }}
   AI_MODEL: ${{ secrets.AI_MODEL }}

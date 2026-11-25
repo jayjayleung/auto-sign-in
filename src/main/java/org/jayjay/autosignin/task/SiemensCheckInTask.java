@@ -42,6 +42,12 @@ public class SiemensCheckInTask extends CheckInTask {
 
     static final String USERNAME_KEY = "SIEMENS_USERNAME";
     static final String PASSWORD_KEY = "SIEMENS_PASSWORD";
+    /**
+     * 总开关，默认开启。
+     * 设为 false 时整个西门子签到（含每日任务）都不执行，通知里也不再出现这一组，
+     * 适合临时停掉账号但不删配置。
+     */
+    static final String ENABLED_KEY = "SIEMENS_ENABLED";
     /** 设为 false 可以只签到、不执行发帖类每日任务。 */
     static final String DAILY_TASKS_KEY = "SIEMENS_DAILY_TASKS";
     /**
@@ -375,6 +381,11 @@ public class SiemensCheckInTask extends CheckInTask {
     @Override
     public CheckInTask run() {
         try {
+            if (!siemensEnabled()) {
+                System.out.println("[西门子] 已按配置关闭，跳过签到");
+                enabled = false;
+                return this;
+            }
             System.out.println("[西门子] 签到任务开始");
             String username = environment == null ? null : environment.get(USERNAME_KEY);
             String password = environment == null ? null : environment.get(PASSWORD_KEY);
@@ -554,6 +565,19 @@ public class SiemensCheckInTask extends CheckInTask {
     }
 
     // ==================== 每日任务编排 ====================
+
+    /**
+     * 总开关，默认开启。
+     * 只有显式配 false 或 0 才整体跳过，留空时保持原来的行为。
+     */
+    private boolean siemensEnabled() {
+        String flag = environment == null ? null : environment.get(ENABLED_KEY);
+        if (StrUtil.isBlank(flag)) {
+            return true;
+        }
+        String trimmed = flag.trim();
+        return !"false".equalsIgnoreCase(trimmed) && !"0".equals(trimmed);
+    }
 
     private boolean dailyTasksEnabled() {
         String flag = environment == null ? null : environment.get(DAILY_TASKS_KEY);

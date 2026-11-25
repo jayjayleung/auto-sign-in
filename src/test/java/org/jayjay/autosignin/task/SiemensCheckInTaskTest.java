@@ -136,6 +136,50 @@ public class SiemensCheckInTaskTest {
     }
 
     @Test
+    public void skipsEverythingWhenSwitchIsOff() {
+        Map<String, String> environment = environment();
+        environment.put("SIEMENS_ENABLED", "false");
+        SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl, true);
+        task.run();
+
+        // 总开关关闭时连登录都不该发，而且整组通知要隐藏。
+        assertFalse(task.isEnabled());
+        assertFalse(task.getNotificationSection().hasContent());
+        assertEquals(0, loginPosts.get());
+        assertEquals(0, signActions.get());
+    }
+
+    @Test
+    public void switchDefaultsToEnabled() {
+        // 留空默认执行，显式 false / 0 才关闭。
+        assertTrue(siemensEnabled(new SiemensCheckInTask(environment(), baseUrl)));
+        Map<String, String> off = environment();
+        off.put("SIEMENS_ENABLED", "0");
+        assertFalse(siemensEnabled(new SiemensCheckInTask(off, baseUrl)));
+        Map<String, String> on = environment();
+        on.put("SIEMENS_ENABLED", "true");
+        assertTrue(siemensEnabled(new SiemensCheckInTask(on, baseUrl)));
+        // 0 也要真的拦住整个任务，不能只影响开关判断。
+        Map<String, String> zero = environment();
+        zero.put("SIEMENS_ENABLED", "0");
+        SiemensCheckInTask zeroTask = new SiemensCheckInTask(zero, baseUrl);
+        zeroTask.run();
+        assertFalse(zeroTask.isEnabled());
+        assertEquals(0, loginPosts.get());
+    }
+
+    private static boolean siemensEnabled(SiemensCheckInTask task) {
+        try {
+            java.lang.reflect.Method method =
+                    SiemensCheckInTask.class.getDeclaredMethod("siemensEnabled");
+            method.setAccessible(true);
+            return (Boolean) method.invoke(task);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    @Test
     public void signsInAndReportsProfile() {
         Map<String, String> environment = environment();
         SiemensCheckInTask task = new SiemensCheckInTask(environment, baseUrl);
