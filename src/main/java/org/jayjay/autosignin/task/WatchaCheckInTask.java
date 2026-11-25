@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +26,9 @@ public class WatchaCheckInTask extends CheckInTask {
     private static final String DEFAULT_BASE_URL = "https://watcha.cn";
     private static final String USERNAME_KEY = "WATCHA_USERNAME";
     private static final String PASSWORD_KEY = "WATCHA_PASSWORD";
-    private static final String PUBLISH_KEY = "WATCHA_PUBLISH";
+    private static final String POST_KEY = "WATCHA_PUBLISH_POST";
+    private static final String LEGACY_PUBLISH_KEY = "WATCHA_PUBLISH";
+    private static final String REVIEW_REMINDER_KEY = "WATCHA_REVIEW_REMINDER";
     private static final String GUAZI_NAME = "瓜子";
     private static final String[] QUEST_CODES = {
             "daily.product_review", "weekly.review", "weekly.posting",
@@ -206,43 +208,33 @@ public class WatchaCheckInTask extends CheckInTask {
     }
 
     private void completeQuests(String token) {
-        String publish = environment == null ? "" : StrUtil.nullToEmpty(environment.get(PUBLISH_KEY)).trim();
-        if (!isPublishEnabled(publish)) {
-            if (publish.isEmpty() || isPublishDisabled(publish)) {
-                System.out.println("[观猹] 自动发布未开启，跳过猹评和发帖");
-                return;
-            }
-            System.err.println("[观猹] WATCHA_PUBLISH 仅支持 true 或 false");
-            addMessage(new MessageBlock()
-                    .addLine("任务结果：已跳过")
-                    .addLine("原因：WATCHA_PUBLISH 仅支持 true 或 false"));
-            return;
+        QuestRun run = new QuestRun();
+        String postKey = StrUtil.isBlank(environment.get(POST_KEY)) ? LEGACY_PUBLISH_KEY : POST_KEY;
+        boolean publishPost = optionEnabled(postKey, run.block);
+        boolean remindReview = optionEnabled(REVIEW_REMINDER_KEY, run.block);
+        if (publishPost && !copywriter.isReady()) {
+            String reason = copywriter.isPartial() ? "文案接口配置不完整" : "文案接口未配置";
+            run.block.addLine("本周帖子：已跳过").addLine("原因：", reason);
+            publishPost = false;
         }
-        if (copywriter.isPartial()) {
-            System.out.println("[观猹] 文案接口配置不完整，跳过猹评和发帖");
-            addMessage(new MessageBlock()
-                    .addLine("任务结果：已跳过")
-                    .addLine("原因：文案接口配置不完整"));
-            return;
-        }
-        if (!copywriter.isReady()) {
-            System.out.println("[观猹] 文案接口未配置，跳过猹评和发帖");
+        if (!publishPost && !remindReview) {
+            addMessage(run.block);
             return;
         }
 
-        QuestRun run = new QuestRun();
         try {
-            System.out.println("[观猹] 开始处理每日和每周任务");
-            JSONObject items = prepareQuests(token);
-            claimAll(items, token, run);
-            publishReviews(items, token, run);
-            if (run.aiFailure != null) {
-                run.block.addLine("本周帖子：已跳过");
-                run.block.addLine("原因：前置猹评处理失败（", run.aiFailure, "）");
-            } else {
-                publishPosts(items, token, run);
+            JSONObject items = fetchQuests(token);
+            if (remindReview) {
+                remindReview(items, token, run);
             }
-            claimWithRetry(token, run);
+            if (publishPost) {
+                if (receiveIfNeeded(items, token)) {
+                    items = fetchQuests(token);
+                }
+                claimAll(items, token, run);
+                publishPosts(items, token, run);
+                claimWithRetry(token, run);
+            }
         } catch (Exception e) {
             String error = safeMessage(e.getMessage());
             System.err.println("[观猹] 任务失败：" + error);
@@ -252,12 +244,15 @@ public class WatchaCheckInTask extends CheckInTask {
         addMessage(run.block);
     }
 
-    private JSONObject prepareQuests(String token) {
-        JSONObject items = fetchQuests(token);
-        if (!receiveIfNeeded(items, token)) {
-            return items;
+    private boolean optionEnabled(String key, MessageBlock block) {
+        String value = StrUtil.trimToEmpty(environment.get(key));
+        if ("true".equalsIgnoreCase(value) || "1".equals(value)) {
+            return true;
         }
-        return fetchQuests(token);
+        if (!value.isEmpty() && !"false".equalsIgnoreCase(value) && !"0".equals(value)) {
+            block.addLine("配置有误：", key, " 仅支持 true、false、1 或 0");
+        }
+        return false;
     }
 
     private JSONObject fetchQuests(String token) {
@@ -432,59 +427,38 @@ public class WatchaCheckInTask extends CheckInTask {
         return total;
     }
 
-    private void publishReviews(JSONObject items, String token, QuestRun run) {
+    private void remindReview(JSONObject items, String token, QuestRun run) {
         JSONObject daily = items.getJSONObject("daily.product_review");
-        JSONObject weekly = items.getJSONObject("weekly.review");
-        int weeklyCount = weekly == null ? 0 : numberValue(weekly.getJSONObject("state"), "count");
-        if (daily == null) {
-            run.block.addLine("今日猹评：已跳过");
-            run.block.addLine("原因：任务进度里没有每日猹评");
-            return;
-        }
-        if (isClosed(daily.getStr("status"))) {
-            run.block.addLine("今日猹评：已跳过");
-            run.block.addLine("原因：今日任务暂不可用");
+        if (daily == null || isClosed(daily.getStr("status"))) {
+            run.block.addLine("今日猹评：任务暂不可用");
             return;
         }
         if (reviewFinished(daily)) {
             run.block.addLine("今日猹评：今日已完成");
-            run.block.addLine("本周猹评：", weeklyCount + "/" + WEEKLY_TIERS);
-            return;
-        }
-        List<LoadedProduct> products = loadProducts(token, daily, run);
-        LoadedProduct target = firstWritable(products, run);
-        if (target == null) {
-            run.block.addLine("今日猹评：已跳过");
-            run.block.addLine("原因：", reviewSkipReason(products));
-            return;
-        }
-        pause.betweenActions();
-        WatchaAiCopywriter.DraftResult draft = copywriter.writeReview(
-                target.name, target.slogan, target.categories, target.description, target.id);
-        if (!draft.ok()) {
-            String failure = safeMessage(draft.failure);
-            run.block.addLine("今日猹评：已跳过");
-            run.block.addLine("原因：", failure);
-            if (draft.failure != null && draft.failure.startsWith("文案生成失败")) {
-                run.aiFailure = failure;
+            JSONObject weekly = items.getJSONObject("weekly.review");
+            if (weekly != null) {
+                run.block.addLine("本周猹评：", numberValue(weekly.getJSONObject("state"), "count") + "/" + WEEKLY_TIERS);
             }
             return;
         }
-        JSONObject body = JSONUtil.createObj()
-                .set("content", document(draft.paragraphs))
-                .set("vote_value", draft.voteValue)
-                .set("images", "")
-                .set("append", false);
-        requestData(authorized(HttpRequest.post(baseUrl + "/api/v2/products/" + target.id + "/reviews"), token)
-                .body(body.toString())
-                .execute(), "发布猹评");
-        target.reviewedByMe = true;
-        run.usedProductIds.add(target.id);
-        run.reviewedProductId = target.id;
-        run.published = true;
-        run.block.addLine("今日猹评：已发布 ", sanitize(target.name));
-        run.block.addLine("本周猹评：", Math.min(weeklyCount + 1, WEEKLY_TIERS) + "/" + WEEKLY_TIERS);
-        System.out.println("[观猹] 已发布猹评：" + sanitize(target.name));
+        Set<Integer> ids = recommendedIds(daily);
+        if (ids.isEmpty()) {
+            run.block.addLine("今日猹评：到任务中心查看推荐 ", baseUrl, "/quest");
+            return;
+        }
+        run.block.addLine("今日猹评：体验后可在产品页填写");
+        for (int id : ids) {
+            String name = "推荐产品 #" + id;
+            try {
+                name = loadProduct(token, id, run).name;
+            } catch (RuntimeException e) {
+                if (isCaptcha(e)) {
+                    throw e;
+                }
+                System.err.println("[观猹] 无法读取推荐产品 #" + id + " 的名称：" + safeMessage(e.getMessage()));
+            }
+            run.block.addLine(sanitize(name), " ", baseUrl, "/products/", String.valueOf(id));
+        }
     }
 
     private void publishPosts(JSONObject items, String token, QuestRun run) {
@@ -509,13 +483,18 @@ public class WatchaCheckInTask extends CheckInTask {
             run.block.addLine("本周帖子：", count + "/" + WEEKLY_TIERS);
             return;
         }
-        JSONObject daily = items.getJSONObject("daily.product_review");
-        List<LoadedProduct> products = daily == null
-                ? new ArrayList<LoadedProduct>() : loadProducts(token, daily, run);
-        LoadedProduct target = firstWritable(products, run);
+        Set<Integer> ids = recommendedIds(items.getJSONObject("daily.product_review"));
+        LoadedProduct target = null;
+        for (int id : ids) {
+            LoadedProduct product = loadProduct(token, id, run);
+            if (WatchaAiCopywriter.findAnchors(product.description).size() >= 2) {
+                target = product;
+                break;
+            }
+        }
         if (target == null) {
             run.block.addLine("本周帖子：已跳过");
-            run.block.addLine("原因：", postSkipReason(products));
+            run.block.addLine("原因：", ids.isEmpty() ? "没有今日推荐" : "推荐产品介绍太短");
             return;
         }
         pause.betweenActions();
@@ -535,7 +514,6 @@ public class WatchaCheckInTask extends CheckInTask {
         requestData(authorized(HttpRequest.post(baseUrl + "/api/v2/discuss/posts"), token)
                 .body(body.toString())
                 .execute(), "发布帖子");
-        run.usedProductIds.add(target.id);
         run.published = true;
         run.block.addLine("本周帖子：已发布 ", sanitize(draft.title));
         System.out.println("[观猹] 已发布帖子：" + sanitize(draft.title));
@@ -592,79 +570,34 @@ public class WatchaCheckInTask extends CheckInTask {
         }
     }
 
-    private List<LoadedProduct> loadProducts(String token, JSONObject quest, QuestRun run) {
-        if (run.products != null) {
-            return run.products;
-        }
-        List<LoadedProduct> products = new ArrayList<LoadedProduct>();
-        JSONObject state = quest.getJSONObject("state");
-        JSONArray ids = state == null ? null : state.getJSONArray("product_ids");
-        if (ids != null) {
-            for (int index = 0; index < ids.size(); index++) {
-                int id = intValue(ids.get(index));
+    private static Set<Integer> recommendedIds(JSONObject daily) {
+        Set<Integer> ids = new LinkedHashSet<>();
+        JSONObject state = daily == null ? null : daily.getJSONObject("state");
+        JSONArray products = state == null ? null : state.getJSONArray("product_ids");
+        if (products != null) {
+            for (Object value : products) {
+                int id = intValue(value);
                 if (id > 0) {
-                    products.add(loadProduct(token, id));
+                    ids.add(id);
                 }
             }
         }
-        run.products = products;
-        return products;
+        return ids;
     }
 
-    private LoadedProduct loadProduct(String token, int id) {
+    private LoadedProduct loadProduct(String token, int id, QuestRun run) {
+        LoadedProduct cached = run.products.get(id);
+        if (cached != null) {
+            return cached;
+        }
         JSONObject product = requestData(authorized(HttpRequest.get(baseUrl + "/api/v2/products/" + id), token)
                 .execute(), "读取推荐产品");
-        JSONObject mine = requestData(authorized(
-                HttpRequest.get(baseUrl + "/api/v2/products/" + id + "/reviews/user"), token)
-                .execute(), "读取我的猹评");
-        JSONArray reviews = mine.getJSONArray("reviews");
-        String description = WatchaAiCopywriter.limit(WatchaAiCopywriter.plainText(product.get("description")));
-        return new LoadedProduct(id,
-                StrUtil.blankToDefault(product.getStr("name"), "推荐产品"),
-                StrUtil.nullToEmpty(product.getStr("slogan")),
-                categoryText(product),
-                description,
-                WatchaAiCopywriter.findAnchors(description),
-                reviews != null && !reviews.isEmpty());
-    }
-
-    private static LoadedProduct firstWritable(List<LoadedProduct> products, QuestRun run) {
-        for (LoadedProduct product : products) {
-            if (product.reviewedByMe || run.usedProductIds.contains(product.id) || product.anchors.size() < 2) {
-                continue;
-            }
-            return product;
-        }
-        return null;
-    }
-
-    private static String reviewSkipReason(List<LoadedProduct> products) {
-        if (products.isEmpty()) {
-            return "没有今日推荐";
-        }
-        for (LoadedProduct product : products) {
-            if (product.anchors.size() >= 2 && !product.reviewedByMe) {
-                return "没有可发布的推荐产品";
-            }
-        }
-        for (LoadedProduct product : products) {
-            if (product.anchors.size() >= 2) {
-                return "推荐产品都已评过";
-            }
-        }
-        return "推荐产品介绍太短";
-    }
-
-    private static String postSkipReason(List<LoadedProduct> products) {
-        if (products.isEmpty()) {
-            return "没有今日推荐";
-        }
-        for (LoadedProduct product : products) {
-            if (product.anchors.size() >= 2) {
-                return "没有另一款可写的推荐产品";
-            }
-        }
-        return "推荐产品介绍太短";
+        LoadedProduct loaded = new LoadedProduct(id,
+                StrUtil.blankToDefault(product.getStr("name"), "推荐产品 #" + id),
+                StrUtil.nullToEmpty(product.getStr("slogan")), categoryText(product),
+                WatchaAiCopywriter.limit(WatchaAiCopywriter.plainText(product.get("description"))));
+        run.products.put(id, loaded);
+        return loaded;
     }
 
     private static boolean reviewFinished(JSONObject quest) {
@@ -814,14 +747,6 @@ public class WatchaCheckInTask extends CheckInTask {
         return headers;
     }
 
-    private static boolean isPublishEnabled(String value) {
-        return "true".equalsIgnoreCase(value) || "1".equals(value);
-    }
-
-    private static boolean isPublishDisabled(String value) {
-        return "false".equalsIgnoreCase(value) || "0".equals(value);
-    }
-
     private static boolean boolValue(JSONObject object, String key) {
         if (object == null) {
             return false;
@@ -892,11 +817,8 @@ public class WatchaCheckInTask extends CheckInTask {
 
     private static final class QuestRun {
         private final MessageBlock block = new MessageBlock();
-        private final Set<Integer> usedProductIds = new LinkedHashSet<Integer>();
-        private List<LoadedProduct> products;
+        private final Map<Integer, LoadedProduct> products = new HashMap<>();
         private boolean published;
-        private String aiFailure;
-        private int reviewedProductId;
     }
 
     private static final class CheckInReport {
@@ -919,18 +841,13 @@ public class WatchaCheckInTask extends CheckInTask {
         private final String slogan;
         private final String categories;
         private final String description;
-        private final List<String> anchors;
-        private boolean reviewedByMe;
 
-        private LoadedProduct(int id, String name, String slogan, String categories, String description,
-                              List<String> anchors, boolean reviewedByMe) {
+        private LoadedProduct(int id, String name, String slogan, String categories, String description) {
             this.id = id;
             this.name = name;
             this.slogan = slogan;
             this.categories = categories;
             this.description = description;
-            this.anchors = anchors;
-            this.reviewedByMe = reviewedByMe;
         }
     }
 }

@@ -70,7 +70,6 @@ public class WatchaCheckInTaskTest {
     private final AtomicInteger discussRequests = new AtomicInteger();
     private final AtomicInteger receiveRequests = new AtomicInteger();
     private final AtomicReference<String> aiAuthorization = new AtomicReference<>();
-    private final AtomicReference<String> reviewBody = new AtomicReference<>();
     private final AtomicReference<String> discussBody = new AtomicReference<>();
     private final List<String> aiBodies = Collections.synchronizedList(new ArrayList<String>());
     private final List<String> claimBodies = Collections.synchronizedList(new ArrayList<String>());
@@ -114,7 +113,6 @@ public class WatchaCheckInTaskTest {
         discussRequests.set(0);
         receiveRequests.set(0);
         aiAuthorization.set(null);
-        reviewBody.set(null);
         discussBody.set(null);
         aiBodies.clear();
         claimBodies.clear();
@@ -288,63 +286,49 @@ public class WatchaCheckInTaskTest {
     }
 
     @Test
-    public void publishesReviewAndPostThenClaimsRewards() {
+    public void remindsAndPublishesOnlyTheDiscussionPost() {
         WatchaCheckInTask task = questTask(accountWithAi());
-
         task.run();
 
-        assertEquals(3, pauses.get());
-        assertEquals(2, aiRequests.get());
-        assertEquals(2, searchRequests.get());
+        assertEquals(2, pauses.get());
+        assertEquals(1, aiRequests.get());
+        assertEquals(1, searchRequests.get());
         assertEquals(0, nativeSearchRequests.get());
         assertTrue(searchQueries.get(0).contains("q=切问 官网"));
-        assertTrue(searchQueries.get(1).contains("q=时者 官网"));
-        assertEquals(1, reviewRequests.get());
+        assertEquals(0, reviewRequests.get());
         assertEquals(1, discussRequests.get());
         assertEquals("Bearer ai-test-key", aiAuthorization.get());
         assertEquals("Bearer login-token", authorization.get());
         assertTrue(aiBodies.get(0).contains("\"model\":\"test-model\""));
-        assertTrue(aiBodies.get(0).contains("体裁：猹评"));
-        assertTrue(aiBodies.get(1).contains("体裁：帖子"));
+        assertTrue(aiBodies.get(0).contains("体裁：帖子"));
         assertTrue(aiBodies.get(0).contains("官网资料补充"));
-        assertTrue(aiBodies.get(1).contains("官网资料补充"));
-        assertTrue(aiBodies.get(0).contains("不要写成对材料的转述"));
         assertFalse(aiBodies.toString().contains("secret-password"));
         assertFalse(aiBodies.toString().contains("login-token"));
-        JSONObject review = JSONUtil.parseObj(reviewBody.get());
-        assertEquals(Integer.valueOf(1), review.getInt("vote_value"));
-        assertEquals(Boolean.FALSE, review.getBool("append"));
-        assertEquals("doc", review.getJSONObject("content").getStr("type"));
         JSONObject post = JSONUtil.parseObj(discussBody.get());
-        assertEquals(Integer.valueOf(8), post.getInt("product_id"));
+        assertEquals(Integer.valueOf(7), post.getInt("product_id"));
+        assertEquals("doc", post.getJSONObject("content").getStr("type"));
         assertEquals(POST_TITLE, post.getStr("title"));
-        assertEquals(3, claimBodies.size());
-        assertTrue(claimPaths.get(0).contains("/quests/19/claim-reward"));
-        assertTrue(claimPaths.get(1).contains("review_1"));
-        assertTrue(claimPaths.get(2).contains("posting_1"));
-        assertTrue(claimBodies.get(0).contains("100"));
-        assertTrue(claimBodies.get(1).contains("101"));
-        assertTrue(claimBodies.get(2).contains("102"));
-        assertEquals("用户名：观猹用户\n瓜子：203\n连续签到：5 天\n签到结果：签到成功，获得 8 瓜子",
-                task.getMessageBlocks().get(0).toString());
-        assertEquals("今日猹评：已发布 切问\n"
-                + "本周猹评：1/3\n"
-                + "本周帖子：已发布 " + POST_TITLE + "\n"
-                + "领取奖励：每日产品猹评，获得 30 瓜子\n"
-                + "领取奖励：每周猹评 1/3 篇，获得 30 瓜子\n"
-                + "领取奖励：每周发帖 1/3 篇，获得 15 瓜子\n"
-                + "本次获得瓜子：83", task.getMessageBlocks().get(1).toString());
+        assertEquals(1, claimPaths.size());
+        assertTrue(claimPaths.get(0).contains("posting_1"));
+        assertTrue(claimBodies.get(0).contains("102"));
+        assertTrue(task.getMessageBlocks().get(0).toString().contains("瓜子：143"));
+        String quest = task.getMessageBlocks().get(1).toString();
+        assertTrue(quest.contains("切问 " + baseUrl + "/products/7"));
+        assertTrue(quest.contains("时者 " + baseUrl + "/products/8"));
+        assertTrue(quest.contains("本周帖子：已发布 " + POST_TITLE));
+        assertTrue(quest.endsWith("本次获得瓜子：23"));
     }
 
     @Test
     public void claimsDelayedPostRewardEvenWhenFirstRoundClaimedOthers() {
+        product7Reviewed = true;
         postProgressLags = true;
 
         WatchaCheckInTask task = questTask(accountWithAi());
         task.run();
 
         assertEquals(1, discussRequests.get());
-        assertEquals(3, pauses.get());
+        assertEquals(2, pauses.get());
         assertEquals(3, claimPaths.size());
         assertTrue(claimPaths.get(0).contains("/quests/19/claim-reward"));
         assertTrue(claimPaths.get(1).contains("review_1"));
@@ -398,15 +382,25 @@ public class WatchaCheckInTaskTest {
     }
 
     @Test
-    public void publishesBadVoteWhenCopywriterSaysSo() {
-        aiMode = "bad";
-
-        WatchaCheckInTask task = questTask(accountWithAi());
+    public void reviewReminderRunsWithoutAiAndOnlyReadsQuestData() {
+        Map<String, String> environment = account();
+        environment.put("WATCHA_REVIEW_REMINDER", "1");
+        dailyReceivable = true;
+        weeklyPostCount = 1;
+        productIds = new int[]{7, 7, 8};
+        WatchaCheckInTask task = questTask(environment);
         task.run();
 
-        assertEquals(1, reviewRequests.get());
-        JSONObject review = JSONUtil.parseObj(reviewBody.get());
-        assertEquals(Integer.valueOf(2), review.getInt("vote_value"));
+        String message = task.getMessageBlocks().get(1).toString();
+        assertEquals("今日猹评：体验后可在产品页填写\n切问 " + baseUrl + "/products/7\n时者 " + baseUrl + "/products/8", message);
+        assertEquals(1, questFetches.get());
+        assertEquals(0, receiveRequests.get());
+        assertTrue(claimPaths.isEmpty());
+        assertEquals(0, pauses.get());
+        assertEquals(0, searchRequests.get());
+        assertEquals(0, aiRequests.get());
+        assertEquals(0, reviewRequests.get());
+        assertEquals(0, discussRequests.get());
     }
 
     @Test
@@ -417,7 +411,8 @@ public class WatchaCheckInTaskTest {
         task.run();
 
         assertEquals(1, receiveRequests.get());
-        assertEquals(1, reviewRequests.get());
+        assertEquals(1, discussRequests.get());
+        assertEquals(0, reviewRequests.get());
     }
 
     @Test
@@ -448,25 +443,24 @@ public class WatchaCheckInTaskTest {
 
         assertEquals(0, aiRequests.get());
         assertEquals(0, reviewRequests.get());
-        assertEquals("今日猹评：已跳过\n原因：推荐产品介绍太短\n本周帖子：已跳过\n原因：推荐产品介绍太短",
-                task.getMessageBlocks().get(1).toString());
+        String message = task.getMessageBlocks().get(1).toString();
+        assertTrue(message.contains("切问 " + baseUrl + "/products/7"));
+        assertTrue(message.endsWith("本周帖子：已跳过\n原因：推荐产品介绍太短"));
     }
 
     @Test
-    public void doesNotPublishWhenCopyIsRejected() {
+    public void rejectedPostDoesNotSuppressReviewReminder() {
         aiMode = "banned";
-
         WatchaCheckInTask task = questTask(accountWithAi());
         task.run();
 
-        assertEquals(3, pauses.get());
-        assertEquals(3, aiRequests.get());
+        assertEquals(2, aiRequests.get());
         assertEquals(1, searchRequests.get());
         assertEquals(0, reviewRequests.get());
-        assertEquals(1, discussRequests.get());
-        assertEquals(Integer.valueOf(7), JSONUtil.parseObj(discussBody.get()).getInt("product_id"));
-        assertTrue(task.getMessageBlocks().get(1).toString().startsWith(
-                "今日猹评：已跳过\n原因：出现了不适合的说法\n本周帖子：已发布 "));
+        assertEquals(0, discussRequests.get());
+        String message = task.getMessageBlocks().get(1).toString();
+        assertTrue(message.contains("切问 " + baseUrl + "/products/7"));
+        assertTrue(message.contains("本周帖子：已跳过\n原因：出现了不适合的说法"));
     }
 
     @Test
@@ -478,12 +472,10 @@ public class WatchaCheckInTaskTest {
         WatchaCheckInTask task = questTask(environment);
         task.run();
 
-        assertEquals(4, aiRequests.get());
+        assertEquals(2, aiRequests.get());
         assertTrue(aiBodies.get(0).contains("\"model\":\"test-model\""));
         assertTrue(aiBodies.get(1).contains("\"model\":\"lite-model\""));
-        assertTrue(aiBodies.get(2).contains("\"model\":\"test-model\""));
-        assertTrue(aiBodies.get(3).contains("\"model\":\"lite-model\""));
-        assertEquals(1, reviewRequests.get());
+        assertEquals(0, reviewRequests.get());
         assertEquals(1, discussRequests.get());
     }
 
@@ -533,7 +525,7 @@ public class WatchaCheckInTaskTest {
         String quest = task.getMessageBlocks().get(1).toString();
         assertTrue(quest.contains("文案生成失败"));
         assertTrue(quest.contains("busy"));
-        assertTrue(quest.contains("本周帖子：已跳过\n原因：前置猹评处理失败（文案生成失败：busy）"));
+        assertTrue(quest.contains("本周帖子：已跳过\n原因：文案生成失败：busy"));
         assertFalse(quest.contains("文案接口不可用"));
     }
 
@@ -551,7 +543,7 @@ public class WatchaCheckInTaskTest {
         assertEquals(0, reviewRequests.get());
         assertEquals(0, discussRequests.get());
         String quest = task.getMessageBlocks().get(1).toString();
-        assertTrue(quest.contains("本周帖子：已跳过\n原因：前置猹评处理失败（文案生成失败：公开搜索返回 HTTP 503）"));
+        assertTrue(quest.contains("本周帖子：已跳过\n原因：文案生成失败：公开搜索返回 HTTP 503"));
         assertFalse(quest.contains("文案接口不可用"));
     }
 
@@ -580,7 +572,7 @@ public class WatchaCheckInTaskTest {
 
         assertEquals(1, checkInRequests.get());
         assertEquals(0, aiRequests.get());
-        assertEquals("任务结果：已跳过\n原因：文案接口配置不完整", task.getMessageBlocks().get(1).toString());
+        assertEquals("本周帖子：已跳过\n原因：文案接口配置不完整", task.getMessageBlocks().get(1).toString());
     }
 
     @Test
@@ -596,23 +588,79 @@ public class WatchaCheckInTaskTest {
     }
 
     @Test
-    public void reportsInvalidPublishSwitch() {
+    public void invalidPostSwitchDoesNotDisableReviewReminder() {
         Map<String, String> environment = accountWithAi();
-        environment.put("WATCHA_PUBLISH", "maybe");
-
-        WatchaCheckInTask task = task(environment);
+        environment.put("WATCHA_PUBLISH_POST", "maybe");
+        WatchaCheckInTask task = questTask(environment);
         task.run();
 
         assertEquals(1, checkInRequests.get());
         assertEquals(0, aiRequests.get());
-        assertEquals("任务结果：已跳过\n原因：WATCHA_PUBLISH 仅支持 true 或 false",
-                task.getMessageBlocks().get(1).toString());
+        assertEquals(0, discussRequests.get());
+        String message = task.getMessageBlocks().get(1).toString();
+        assertTrue(message.contains("配置有误：WATCHA_PUBLISH_POST"));
+        assertTrue(message.contains("切问 " + baseUrl + "/products/7"));
+    }
+
+    @Test
+    public void legacyPublishOnlyEnablesPosts() {
+        Map<String, String> environment = accountWithAi();
+        environment.put("WATCHA_PUBLISH_POST", "");
+        environment.put("WATCHA_PUBLISH", "1");
+        environment.remove("WATCHA_REVIEW_REMINDER");
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        assertEquals(1, discussRequests.get());
+        assertEquals(0, reviewRequests.get());
+        assertFalse(task.getMessageBlocks().get(1).toString().contains("今日猹评"));
+    }
+
+    @Test
+    public void explicitPostOffOverridesLegacyPublish() {
+        Map<String, String> environment = accountWithAiDisabled();
+        environment.put("WATCHA_PUBLISH", "true");
+        questTask(environment).run();
+
+        assertEquals(0, questFetches.get());
+        assertEquals(0, reviewRequests.get());
+        assertEquals(0, discussRequests.get());
+    }
+
+    @Test
+    public void newPostSwitchWorksWithInvalidReminderAndLegacyOff() {
+        Map<String, String> environment = accountWithAi();
+        environment.put("WATCHA_PUBLISH", "false");
+        environment.put("WATCHA_REVIEW_REMINDER", "maybe");
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        assertEquals(1, discussRequests.get());
+        assertEquals(0, reviewRequests.get());
+        String message = task.getMessageBlocks().get(1).toString();
+        assertTrue(message.contains("配置有误：WATCHA_REVIEW_REMINDER"));
+        assertFalse(message.contains("今日猹评"));
+    }
+
+    @Test
+    public void incompletePostConfigurationStillGivesReviewEntry() {
+        Map<String, String> environment = account();
+        environment.put("WATCHA_PUBLISH_POST", "true");
+        environment.put("AI_MODEL", "test-model");
+        environment.put("WATCHA_REVIEW_REMINDER", "true");
+        productIds = new int[0];
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        String message = task.getMessageBlocks().get(1).toString();
+        assertTrue(message.contains("文案接口配置不完整"));
+        assertTrue(message.contains(baseUrl + "/quest"));
+        assertEquals(0, aiRequests.get());
+        assertEquals(0, discussRequests.get());
     }
 
     private static final String PRODUCT_7 = "面向科研人员。提供深度检索，还没写清推荐依据。";
     private static final String PRODUCT_8 = "面向排盘学习者。重点是时间规则，没有写明起算日期。";
-    private static final String REVIEW_P1 = "我拿一个熟悉的问题试了切问的深度检索，先看结果是不是围绕同一件事，再逐条核对相关内容。这类工具面向科研人员，我更在意这一轮能不能帮我缩小范围，至少找资料的思路顺了一些。";
-    private static final String REVIEW_P2 = "我用下来还是会回头核对推荐依据，不会直接把结论搬走。碰到不熟悉的话题，关键内容总要再查一遍。能顺着问题继续找资料，我才愿意把它留在自己的工作流程里。";
     private static final String POST_TITLE = "时间规则从哪一天起算";
     private static final String POST_BODY = "我试了这款面向排盘学习者的工具，拿自己会排的例子对了一下时间规则。排盘时我最在意的还是起算日期，口径对不上，后面的结果就得重新核。大家碰到这种情况怎么处理？";
     private static final String POST_FOR_PRODUCT_7 = "我用过这款面向科研人员的工具，试了拿同一个问题换个问法继续检索。相关内容找起来顺了一些，不过我用下来还是会核对推荐依据，不能只看结论。";
@@ -633,7 +681,8 @@ public class WatchaCheckInTaskTest {
 
     private Map<String, String> accountWithAi() {
         Map<String, String> environment = account();
-        environment.put("WATCHA_PUBLISH", "true");
+        environment.put("WATCHA_PUBLISH_POST", "true");
+        environment.put("WATCHA_REVIEW_REMINDER", "true");
         environment.put("AI_BASE_URL", baseUrl + "/v1");
         environment.put("AI_API_KEY", "ai-test-key");
         environment.put("AI_MODEL", "test-model");
@@ -643,7 +692,8 @@ public class WatchaCheckInTaskTest {
 
     private Map<String, String> accountWithAiDisabled() {
         Map<String, String> environment = accountWithAi();
-        environment.put("WATCHA_PUBLISH", "false");
+        environment.put("WATCHA_PUBLISH_POST", "false");
+        environment.put("WATCHA_REVIEW_REMINDER", "false");
         return environment;
     }
 
@@ -785,18 +835,11 @@ public class WatchaCheckInTaskTest {
 
     private void handleProduct(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        String body = readBody(exchange);
+        readBody(exchange);
         int id = productId(path);
-        if (path.endsWith("/reviews/user")) {
-            boolean reviewed = id == 7 && product7Reviewed;
-            json(exchange, 200, "{\"statusCode\":200,\"data\":{\"reviews\":" + (reviewed ? "[{\"id\":1}]" : "[]") + "}}");
-            return;
-        }
-        if (path.endsWith("/reviews")) {
+        if (path.contains("/reviews")) {
             reviewRequests.incrementAndGet();
-            reviewBody.set(body);
-            product7Reviewed = true;
-            json(exchange, 200, "{\"statusCode\":200,\"data\":{\"id\":11}}");
+            json(exchange, 405, "{\"statusCode\":405}");
             return;
         }
         String name = id == 8 ? "时者" : "切问";
@@ -831,27 +874,14 @@ public class WatchaCheckInTaskTest {
             json(exchange, 500, "{\"error\":{\"message\":\"busy\"}}");
             return;
         }
-        boolean reviewRequest = !request.contains("体裁：帖子");
-        JSONObject content = new JSONObject();
-        if (reviewRequest) {
-            JSONArray paragraphs = new JSONArray();
-            if ("banned".equals(aiMode)) {
-                paragraphs.add("亲测很好用。");
-                paragraphs.add("赋能闭环。");
-            } else {
-                paragraphs.add(REVIEW_P1);
-                paragraphs.add(REVIEW_P2);
-            }
-            content.set("paragraphs", paragraphs);
-            content.set("vote", aiMode.startsWith("bad") ? "BAD" : "GOOD");
-        } else {
-            content.set("title", POST_TITLE);
-            JSONArray paragraphs = new JSONArray();
-            paragraphs.add(request.contains("面向科研人员") ? POST_FOR_PRODUCT_7 : POST_BODY);
-            content.set("paragraphs", paragraphs);
+        String body = request.contains("面向科研人员") ? POST_FOR_PRODUCT_7 : POST_BODY;
+        if ("banned".equals(aiMode)) {
+            body = "亲测很好用。";
         }
+        JSONObject content = JSONUtil.createObj().set("title", POST_TITLE)
+                .set("paragraphs", JSONUtil.createArray().put(body));
         String text = content.toString();
-        if ("unparsablePost".equals(aiMode) && !reviewRequest && request.contains("\"model\":\"test-model\"")) {
+        if ("unparsablePost".equals(aiMode) && request.contains("\"model\":\"test-model\"")) {
             // 主模型只回了一段说明，完全不是 JSON，模拟线上偶发的「返回内容无法读取」
             text = "抱歉，这次我直接说说自己的感受吧，没用过就先不评价了。";
         }

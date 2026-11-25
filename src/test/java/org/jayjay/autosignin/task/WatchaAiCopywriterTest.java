@@ -112,20 +112,20 @@ public class WatchaAiCopywriterTest {
     }
 
     @Test
-    public void acceptsGroundedReview() {
+    public void acceptsGroundedPost() {
         List<String> anchors = WatchaAiCopywriter.findAnchors(PRODUCT_7);
 
         assertTrue(anchors.size() >= 2);
-        assertNull(WatchaAiCopywriter.rejectReview(Arrays.asList(REVIEW_P1, REVIEW_P2), PRODUCT_7, anchors));
+        assertNull(WatchaAiCopywriter.rejectPost("深度检索", Arrays.asList(REVIEW_P1, REVIEW_P2), PRODUCT_7, anchors));
     }
 
     @Test
     public void rejectsBannedPhraseAndCopiedIntroduction() {
-        assertEquals("出现了不适合的说法", WatchaAiCopywriter.rejectReview(
+        assertEquals("出现了不适合的说法", WatchaAiCopywriter.rejectPost("深度检索",
                 Arrays.asList("亲测很好用。", "第二段也写了赋能。"), PRODUCT_7, Arrays.asList("科研人员")));
 
         String source = "这是一段用于复制检测的产品介绍文本内容补充";
-        assertEquals("复制了介绍原句", WatchaAiCopywriter.rejectReview(
+        assertEquals("复制了介绍原句", WatchaAiCopywriter.rejectPost("深度检索",
                 Arrays.asList(source.substring(0, 20) + "尾巴", "第二段"), source, Arrays.asList("复制检测")));
     }
 
@@ -133,10 +133,6 @@ public class WatchaAiCopywriterTest {
     public void acceptsExperienceTone() {
         List<String> anchors = WatchaAiCopywriter.findAnchors(PRODUCT_7);
 
-        assertNull(WatchaAiCopywriter.rejectReview(Arrays.asList(
-                "我试了切问的深度检索，拿一个自己熟悉的问题核对结果。这类工具面向科研人员，我最在意的是结果能不能让我少绕弯；这一轮看下来，相关内容的范围更好判断了，也不用一边换词一边重新理清问题。",
-                "我用下来还是会回头核对推荐依据，不会把结论直接搬走。能顺着问题继续查就留着用，碰到陌生领域则多核一遍。"),
-                PRODUCT_7, anchors));
         assertNull(WatchaAiCopywriter.rejectPost("用过深度检索后的一点感受", Arrays.asList(
                 "我用过这款面向科研人员的工具，试了拿同一个问题换个问法继续检索。相关内容找起来顺了一些，不过我用下来还是会核对推荐依据，不能只看结论。"),
                 PRODUCT_7, anchors));
@@ -146,18 +142,9 @@ public class WatchaAiCopywriterTest {
     public void rejectsSourceTalk() {
         List<String> anchors = WatchaAiCopywriter.findAnchors(PRODUCT_7);
 
-        assertEquals("正文里交代了出处", WatchaAiCopywriter.rejectReview(
+        assertEquals("正文里交代了出处", WatchaAiCopywriter.rejectPost("深度检索",
                 Arrays.asList("这款工具介绍里把深度检索写成主要能力。" + REVIEW_P1, REVIEW_P2),
                 PRODUCT_7, anchors));
-    }
-
-    @Test
-    public void mapsVoteToValue() {
-        assertEquals(1, WatchaAiCopywriter.voteValue("GOOD"));
-        assertEquals(2, WatchaAiCopywriter.voteValue("bad"));
-        assertEquals(2, WatchaAiCopywriter.voteValue(" BAD "));
-        assertEquals(1, WatchaAiCopywriter.voteValue(null));
-        assertEquals(1, WatchaAiCopywriter.voteValue("随便"));
     }
 
     @Test
