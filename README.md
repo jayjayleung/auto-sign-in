@@ -53,7 +53,7 @@
 | YUNQIAO_PASSWORD_2 | 云桥账号 2 密码 | 否 |
 | WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
 | WATCHA_PASSWORD | 观猹密码 | 否 |
-| WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
+| WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到。平台禁止猹评通篇 AI 生成，建议保持关闭 | 否 |
 | SIEMENS_USERNAME | 西门子工业支持中心账号，用户名、手机号或邮箱 | 否 |
 | SIEMENS_PASSWORD | 西门子工业支持中心密码 | 否 |
 | SIEMENS_DAILY_TASKS | 西门子每日任务，默认开启；设为 `false` 时只签到 | 否 |
@@ -121,7 +121,7 @@ cp .env.example .env
 | YUNQIAO_PASSWORD_2 | 云桥账号 2 密码 | 否 |
 | WATCHA_USERNAME | 观猹账号，邮箱或手机号 | 否 |
 | WATCHA_PASSWORD | 观猹密码 | 否 |
-| WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到 | 否 |
+| WATCHA_PUBLISH | 观猹自动发布，`true` 或 `1` 开启，留空或 `false` 则只签到。平台禁止猹评通篇 AI 生成，建议保持关闭 | 否 |
 | SIEMENS_USERNAME | 西门子工业支持中心账号，用户名、手机号或邮箱 | 否 |
 | SIEMENS_PASSWORD | 西门子工业支持中心密码 | 否 |
 | SIEMENS_DAILY_TASKS | 西门子每日任务，默认开启；设为 `false` 时只签到 | 否 |
@@ -166,6 +166,7 @@ cp .env.example .env
 - 故事帖的生成提示词走「技术复盘」路线而不是「现场故事」：标题固定为 `【分享】`+具体技术点，正文按「现象 → 排查顺序 → 定位依据 → 结论」写，要求带报警代码、诊断缓冲区原文或测量数值，型号和参数名要符合西门子真实产品体系。站点对故事帖是人工审核，之前那种「记一次夜班抢修」式的纯叙事会被判「非原创内容」——站上通过审核的同类帖子基本都是 `【分享】V90迁移S200注意事项` 这类具体技术内容。
 - 跟日期有关的判断（每日任务当天去重标记、内容库的入库和使用时间）一律显式按北京时间 `Asia/Shanghai` 计算，不看机器默认时区，因此容器（`TZ=Asia/Shanghai`）和 GitHub Actions（runner 默认 UTC）对「今天」的判断一致，同一账号两边跑不会因为差 8 小时而互相不认去重标记。
 - 观猹使用任务中心的每日签到。`WATCHA_USERNAME` 填写登录用的邮箱或手机号。`WATCHA_PUBLISH` 设为 `true`，并且文案接口 `AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL` 三项都填写后，每天再发 1 篇当日推荐产品的猹评；本周帖子少于 3 篇时再发 1 篇。两次发布之间会间隔 20 到 90 秒。开关留空或文案接口留空则只签到。
+- 注意：观猹[社区内容规范](https://docs.watcha.cn/post/review-rule/)明确禁止猹评通篇由 AI 自动生成，也禁止长期频繁发布近似内容。全自动发布会触发布折叠、账号封禁等处理，`WATCHA_PUBLISH` 默认保持关闭，只签到。
 - 观猹生成文案前会先联网核实产品官网和主要功能，再以用过后的第一人称体验口吻生成。默认由程序用「产品名 官网」「产品名 分类 功能」直接查询 Bing 公开搜索，每个查询失败会重试 1 次，取得摘要和来源后交给 Chat Completions 生成文案，不依赖文案服务的联网能力。文案服务能真正执行原生 `web_search` 时，可设 `AI_NATIVE_SEARCH=true` 改由 Responses 检索；若服务只返回 `websearch` 或 `web_search` 函数请求，仍由程序执行 Bing 查询。`AI_SEARCH_URL` 可替换公开搜索地址，一般不用填。没有搜到资料或来源时跳过发布。文案生成单次最多等待 180 秒，最多尝试 2 次；第一次超时、报错或返回的不是合法 JSON 时，第二次改用 `AI_FALLBACK_MODEL`，只是内容不合格时仍用主模型重写。请求会带 `response_format=json_object` 要求服务返回合法 JSON，服务不认这个参数时自动去掉重试；模型偶尔在正文里用英文双引号或输出被截断时，程序会先尝试修复再判定失败。同一产品在本次任务中复用检索资料，文案重写不会重复搜索。搜索资料用于补充产品事实，生成的体验口吻不代表程序实际操作过该产品。
 - 通知方式可选，邮箱/PushPlus/Server酱可按需配置其一或多个。
 
