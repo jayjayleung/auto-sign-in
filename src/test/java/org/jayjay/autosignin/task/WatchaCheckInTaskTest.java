@@ -160,6 +160,7 @@ public class WatchaCheckInTaskTest {
     public void reportsExistingCheckInWithoutPostingAgain() {
         checkedIn = true;
         Map<String, String> environment = account();
+        environment.put("WATCHA_AUTO_REVIEW", "false");
 
         WatchaCheckInTask task = task(environment);
         task.run();
@@ -176,6 +177,7 @@ public class WatchaCheckInTaskTest {
     @Test
     public void checksInAndReportsReward() {
         Map<String, String> environment = account();
+        environment.put("WATCHA_AUTO_REVIEW", "false");
 
         WatchaCheckInTask task = task(environment);
         task.run();
@@ -194,8 +196,10 @@ public class WatchaCheckInTaskTest {
     @Test
     public void keepsBalanceBeforeCheckInWhenFinalBalanceIsUnavailable() {
         balanceFailsAfterFirst = true;
+        Map<String, String> environment = account();
+        environment.put("WATCHA_AUTO_REVIEW", "false");
 
-        WatchaCheckInTask task = task(account());
+        WatchaCheckInTask task = task(environment);
         task.run();
 
         assertEquals(1, task.getMessageBlocks().size());
@@ -384,6 +388,7 @@ public class WatchaCheckInTaskTest {
     @Test
     public void autoReviewListsProductsWithoutCallingAi() {
         Map<String, String> environment = account();
+        environment.put("WATCHA_AUTO_REVIEW", "false");
         environment.put("WATCHA_AUTO_REVIEW", "true");
         dailyReceivable = true;
         weeklyPostCount = 1;
@@ -413,10 +418,10 @@ public class WatchaCheckInTaskTest {
         WatchaCheckInTask task = questTask(environment);
         task.run();
 
-        // 只要帖子不要提醒：通知里没有推荐清单，帖子照发
+        // 只要帖子不要提醒：任务块里只有帖子结果，没有推荐清单
         assertEquals(1, discussRequests.get());
         assertEquals(0, reviewRequests.get());
-        assertFalse(task.getMessageBlocks().get(1).toString().contains("体验后可在产品页填写"));
+        assertFalse(task.getMessageBlocks().toString().contains("体验后可在产品页填写"));
     }
 
     @Test
@@ -430,6 +435,34 @@ public class WatchaCheckInTaskTest {
 
         // 旧键作为新键的后备值
         assertTrue(task.getMessageBlocks().get(1).toString().contains("体验后可在产品页填写"));
+    }
+
+    @Test
+    public void reviewReminderIsOnByDefault() {
+        // 提醒只读、不调 AI、不产生站内内容，所以默认开启
+        Map<String, String> environment = account();
+        productIds = new int[]{7};
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        assertTrue(task.getMessageBlocks().get(1).toString().contains("体验后可在产品页填写"));
+        assertEquals(0, aiRequests.get());
+        assertEquals(0, reviewRequests.get());
+    }
+
+    @Test
+    public void reviewReminderCanBeTurnedOff() {
+        Map<String, String> environment = account();
+        environment.put("WATCHA_AUTO_REVIEW", "false");
+        productIds = new int[]{7};
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        // 提醒关掉、帖子也没开：只有签到块，没有任务块
+        assertEquals(1, task.getMessageBlocks().size());
+        assertFalse(task.getMessageBlocks().toString().contains("体验后可在产品页填写"));
     }
 
     @Test
@@ -594,6 +627,7 @@ public class WatchaCheckInTaskTest {
     public void reportsIncompleteCopyConfigurationAfterCheckIn() {
         Map<String, String> environment = account();
         environment.put("WATCHA_PUBLISH", "true");
+        environment.put("WATCHA_AUTO_REVIEW", "false");
         environment.put("AI_MODEL", "test-model");
 
         WatchaCheckInTask task = task(environment);
@@ -636,13 +670,13 @@ public class WatchaCheckInTaskTest {
         Map<String, String> environment = accountWithAi();
         environment.put("WATCHA_PUBLISH_POST", "");
         environment.put("WATCHA_PUBLISH", "1");
-        environment.remove("WATCHA_REVIEW_REMINDER");
+        environment.put("WATCHA_AUTO_REVIEW", "false");
         WatchaCheckInTask task = questTask(environment);
         task.run();
 
         assertEquals(1, discussRequests.get());
         assertEquals(0, reviewRequests.get());
-        assertFalse(task.getMessageBlocks().get(1).toString().contains("今日猹评"));
+        assertFalse(task.getMessageBlocks().toString().contains("今日猹评"));
     }
 
     @Test
@@ -711,7 +745,7 @@ public class WatchaCheckInTaskTest {
     private Map<String, String> accountWithAi() {
         Map<String, String> environment = account();
         environment.put("WATCHA_PUBLISH_POST", "true");
-        environment.put("WATCHA_REVIEW_REMINDER", "true");
+        environment.put("WATCHA_AUTO_REVIEW", "true");
         environment.put("AI_BASE_URL", baseUrl + "/v1");
         environment.put("AI_API_KEY", "ai-test-key");
         environment.put("AI_MODEL", "test-model");
@@ -722,7 +756,7 @@ public class WatchaCheckInTaskTest {
     private Map<String, String> accountWithAiDisabled() {
         Map<String, String> environment = accountWithAi();
         environment.put("WATCHA_PUBLISH_POST", "false");
-        environment.put("WATCHA_REVIEW_REMINDER", "false");
+        environment.put("WATCHA_AUTO_REVIEW", "false");
         return environment;
     }
 

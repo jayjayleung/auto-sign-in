@@ -222,8 +222,11 @@ public class WatchaCheckInTask extends CheckInTask {
         QuestRun run = new QuestRun();
         String postKey = StrUtil.isBlank(environment.get(POST_KEY)) ? LEGACY_PUBLISH_KEY : POST_KEY;
         boolean publishPost = optionEnabled(postKey, run.block);
-        boolean remindReview = optionEnabled(
-                StrUtil.isBlank(environment.get(AUTO_REVIEW_KEY)) ? LEGACY_REVIEW_KEY : AUTO_REVIEW_KEY, run.block);
+        // 提醒默认开启：只读任务进度、不调 AI、不产生站内内容，是本人手写猹评的唯一入口。
+        // 旧键显式配置过就以旧键为准，否则看新键（未配置时取默认值 true）。
+        boolean remindReview = legacyConfigured(LEGACY_REVIEW_KEY)
+                ? optionEnabled(LEGACY_REVIEW_KEY, run.block)
+                : optionEnabled(AUTO_REVIEW_KEY, run.block, true);
         if (publishPost && !copywriter.isReady()) {
             String reason = copywriter.isPartial() ? "文案接口配置不完整" : "文案接口未配置";
             run.block.addLine("本周帖子：已跳过").addLine("原因：", reason);
@@ -257,14 +260,27 @@ public class WatchaCheckInTask extends CheckInTask {
     }
 
     private boolean optionEnabled(String key, MessageBlock block) {
+        return optionEnabled(key, block, false);
+    }
+
+    /** 未配置时取 defaultValue；非法值在通知里提示并回落到 defaultValue。 */
+    private boolean optionEnabled(String key, MessageBlock block, boolean defaultValue) {
         String value = StrUtil.trimToEmpty(environment.get(key));
+        if (value.isEmpty()) {
+            return defaultValue;
+        }
         if ("true".equalsIgnoreCase(value) || "1".equals(value)) {
             return true;
         }
-        if (!value.isEmpty() && !"false".equalsIgnoreCase(value) && !"0".equals(value)) {
+        if (!"false".equalsIgnoreCase(value) && !"0".equals(value)) {
             block.addLine("配置有误：", key, " 仅支持 true、false、1 或 0");
         }
         return false;
+    }
+
+    /** 这个键是否被用户显式配置过（空白不算）。 */
+    private boolean legacyConfigured(String key) {
+        return !StrUtil.trimToEmpty(environment.get(key)).isEmpty();
     }
 
     private JSONObject fetchQuests(String token) {
