@@ -28,7 +28,10 @@ public class WatchaCheckInTask extends CheckInTask {
     private static final String PASSWORD_KEY = "WATCHA_PASSWORD";
     private static final String POST_KEY = "WATCHA_PUBLISH_POST";
     private static final String LEGACY_PUBLISH_KEY = "WATCHA_PUBLISH";
-    private static final String REVIEW_REMINDER_KEY = "WATCHA_REVIEW_REMINDER";
+    /** 猹评开关。站点规范禁止猹评通篇 AI 生成，所以这里只做「列推荐清单」的提醒，不自动提交。 */
+    private static final String AUTO_REVIEW_KEY = "WATCHA_AUTO_REVIEW";
+    /** 旧键，等价于 WATCHA_AUTO_REVIEW。 */
+    private static final String LEGACY_REVIEW_KEY = "WATCHA_REVIEW_REMINDER";
     private static final String GUAZI_NAME = "瓜子";
     private static final String[] QUEST_CODES = {
             "daily.product_review", "weekly.review", "weekly.posting",
@@ -207,11 +210,20 @@ public class WatchaCheckInTask extends CheckInTask {
         return reward != null && reward > 0 ? "，获得 " + reward + " 瓜子" : "";
     }
 
+    /**
+     * 任务中心：两个开关互相独立。
+     * <p>
+     * {@code WATCHA_AUTO_REVIEW} 只在通知里列出当日推荐产品和体验入口，由本人体验后手写猹评——
+     * 站点规范禁止通篇 AI 生成，自动提交有折叠和封号风险，所以这条链路不自动发布。
+     * {@code WATCHA_PUBLISH_POST} 控制讨论帖，发帖目前没有风控问题，可以单独打开。
+     * 旧键 {@code WATCHA_PUBLISH} 作为讨论帖开关的后备值，{@code WATCHA_REVIEW_REMINDER} 作为猹评提醒的后备值。
+     */
     private void completeQuests(String token) {
         QuestRun run = new QuestRun();
         String postKey = StrUtil.isBlank(environment.get(POST_KEY)) ? LEGACY_PUBLISH_KEY : POST_KEY;
         boolean publishPost = optionEnabled(postKey, run.block);
-        boolean remindReview = optionEnabled(REVIEW_REMINDER_KEY, run.block);
+        boolean remindReview = optionEnabled(
+                StrUtil.isBlank(environment.get(AUTO_REVIEW_KEY)) ? LEGACY_REVIEW_KEY : AUTO_REVIEW_KEY, run.block);
         if (publishPost && !copywriter.isReady()) {
             String reason = copywriter.isPartial() ? "文案接口配置不完整" : "文案接口未配置";
             run.block.addLine("本周帖子：已跳过").addLine("原因：", reason);

@@ -39,3 +39,5 @@ build/
 /target/
 # 容器日志导出目录
 .container-logs/
+# 过程文档（分析、方案、排障记录），按约定不入库
+docs/

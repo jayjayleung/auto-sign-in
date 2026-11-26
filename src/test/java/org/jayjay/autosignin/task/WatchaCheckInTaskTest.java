@@ -382,9 +382,9 @@ public class WatchaCheckInTaskTest {
     }
 
     @Test
-    public void reviewReminderRunsWithoutAiAndOnlyReadsQuestData() {
+    public void autoReviewListsProductsWithoutCallingAi() {
         Map<String, String> environment = account();
-        environment.put("WATCHA_REVIEW_REMINDER", "1");
+        environment.put("WATCHA_AUTO_REVIEW", "true");
         dailyReceivable = true;
         weeklyPostCount = 1;
         productIds = new int[]{7, 7, 8};
@@ -401,6 +401,35 @@ public class WatchaCheckInTaskTest {
         assertEquals(0, aiRequests.get());
         assertEquals(0, reviewRequests.get());
         assertEquals(0, discussRequests.get());
+    }
+
+    @Test
+    public void autoReviewSwitchesIndependentlyFromPost() {
+        Map<String, String> environment = accountWithAi();
+        environment.put("WATCHA_AUTO_REVIEW", "false");
+        environment.put("WATCHA_PUBLISH_POST", "true");
+        productIds = new int[]{7};
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        // 只要帖子不要提醒：通知里没有推荐清单，帖子照发
+        assertEquals(1, discussRequests.get());
+        assertEquals(0, reviewRequests.get());
+        assertFalse(task.getMessageBlocks().get(1).toString().contains("体验后可在产品页填写"));
+    }
+
+    @Test
+    public void legacyReminderKeyStillWorks() {
+        Map<String, String> environment = account();
+        environment.put("WATCHA_REVIEW_REMINDER", "true");
+        productIds = new int[]{7};
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        // 旧键作为新键的后备值
+        assertTrue(task.getMessageBlocks().get(1).toString().contains("体验后可在产品页填写"));
     }
 
     @Test
