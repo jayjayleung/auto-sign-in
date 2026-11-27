@@ -33,7 +33,7 @@ public abstract class CheckInTask {
     boolean enabled = true;
 
 
-    abstract CheckInTask run() throws IOException, InterruptedException;
+    public abstract CheckInTask run() throws IOException, InterruptedException;
 
 
     public static Map<String, String> commonHeaders() {
@@ -140,7 +140,7 @@ public abstract class CheckInTask {
      * 状态文件目录。容器里 /app 在重启后仍然保留，只有重建镜像或 docker compose down
      * 才会丢；本地运行时退回系统临时目录。
      */
-    static Path stateDir() {
+    public static Path stateDir() {
         Path app = Paths.get("/app");
         if (Files.isDirectory(app) && Files.isWritable(app)) {
             return app.resolve("state");

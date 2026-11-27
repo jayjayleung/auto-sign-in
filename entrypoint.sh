@@ -32,17 +32,23 @@ done
 # 默认北京时间每天 9:11 执行，可通过 CRON_SCHEDULE 环境变量自定义
 CRON_SCHEDULE="${CRON_SCHEDULE:-11 9 * * *}"
 
+# 运行日志同时写两份：容器主进程 stdout（docker logs 能看）和 state 目录下按天分的文件。
+# 容器重建会把 stdout 的历史清空，宿主机上挂载的 state 文件才不会丢，看板也读它。
+LOG_DIR=/app/state/logs
+
 # 写入 cron 配置：先加载环境变量，再执行 JAR，日志输出到容器主进程的 stdout；
 # 任务结束后打印与启动行同格式的 [$(date)] 行（\$(date) 在 cron 运行时展开）
 # cron 不会继承容器的 TZ，这里显式声明，保证结束行的时区与启动行一致
 # 注意：/etc/cron.d 下的文件会被 cron 直接读取，不要再 `crontab` 安装一次，
 # 否则会生成一份缺少用户名段的用户 crontab，导致 `root` 被当成命令执行失败并多打一条假的结束行
+# cron 里的 % 必须写成 \%，否则会被当成换行
 {
   echo "SHELL=/bin/bash"
   echo "TZ=${TZ:-Asia/Shanghai}"
-  echo "$CRON_SCHEDULE root . $ENV_FILE && java -jar /app/app.jar >> /proc/1/fd/1 2>&1; echo \"[\$(date)] running finished...\" >> /proc/1/fd/1"
+  echo "$CRON_SCHEDULE root mkdir -p $LOG_DIR && . $ENV_FILE && java -jar /app/app.jar 2>&1 | tee -a $LOG_DIR/\$(date +\\%F).log >> /proc/1/fd/1; echo \"[\$(date)] running finished...\" >> /proc/1/fd/1"
 } > /etc/cron.d/auto-sign-in
 chmod 0644 /etc/cron.d/auto-sign-in
+mkdir -p "$LOG_DIR"
 
 echo "[$(date)] cron scheduled: $CRON_SCHEDULE"
 
