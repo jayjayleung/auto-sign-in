@@ -145,6 +145,24 @@ public final class RunHistory {
         return readFile(file);
     }
 
+    /**
+     * 最近一次完成运行的结束时间；没有可读记录时返回 null。
+     */
+    public static Instant latestFinishedAt(Path stateDir) {
+        for (String name : list(stateDir)) {
+            JSONObject record = readOne(stateDir, name);
+            if (record == null) {
+                continue;
+            }
+            try {
+                return java.time.OffsetDateTime.parse(StrUtil.trimToEmpty(record.getStr("finishedAt"))).toInstant();
+            } catch (DateTimeParseException e) {
+                // 结束时间缺失或格式不对，看下一条。
+            }
+        }
+        return null;
+    }
+
     private static JSONObject readFile(Path file) {
         try {
             JSONObject record = JSONUtil.parseObj(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));

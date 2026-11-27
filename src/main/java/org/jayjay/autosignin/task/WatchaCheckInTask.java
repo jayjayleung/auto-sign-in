@@ -626,6 +626,11 @@ public class WatchaCheckInTask extends CheckInTask {
             run.block.addLine("今日猹评：今日已完成");
             return;
         }
+        if (ledger.unreadable()) {
+            run.block.addLine("今日猹评：已自动停写（台账文件读取失败，无法核对已发猹评）");
+            run.block.addLine("建议：", "人工看一眼账号，确认后删除 state/watcha-review-ledger.json 再恢复");
+            return;
+        }
         if (ledger.paused(LocalDate.now(SHANGHAI))) {
             run.block.addLine("今日猹评：已自动停写（累计 " + ledger.strikes() + " 条不见了）");
             run.block.addLine("建议：", "人工看一眼账号，确认后清空 state/watcha-review-ledger.json 再恢复");

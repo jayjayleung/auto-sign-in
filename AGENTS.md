@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a single Maven module. Java code lives under `src/main/java/org/jayjay/autosignin/`: `task/` holds site-specific check-in flows, `entity/` message models, `util/` shared HTTP and notification helpers, `history/` the per-run result record, `dashboard/` the read-only web board, and `MainApplication` orchestrates each run. Tests mirror these packages under `src/test/java`. Resources are in `src/main/resources/`, with assets in `static/` and the dashboard front end in `src/main/resources/dashboard/` (plain ES modules, no build step). `Dockerfile`, `entrypoint.sh`, and `docker-compose.yml` define container scheduling; CI is in `.github/workflows/auto.yml`.
+This is a single Maven module. Java code lives under `src/main/java/org/jayjay/autosignin/`: `task/` holds site-specific check-in flows, `entity/` message models, `util/` shared HTTP and notification helpers, `history/` the per-run result record, `dashboard/` the read-only web board, `MainApplication` orchestrates each run, and `StaleRunCheck` is a second cron entry that alerts when no run has finished recently. Tests mirror these packages under `src/test/java`. Resources are in `src/main/resources/`, with assets in `static/` and the dashboard front end in `src/main/resources/dashboard/` (plain ES modules, no build step). `Dockerfile`, `entrypoint.sh`, and `docker-compose.yml` define container scheduling; CI is in `.github/workflows/auto.yml`.
 
 ## Build, Test, and Development Commands
 
@@ -29,7 +29,7 @@ Tests use JUnit 4.13.1 under `src/test/java` with `*Test.java` names. Keep netwo
 
 ## Security & Configuration
 
-Copy `.env.example` for local configuration and never commit `.env`, passwords, cookies, or notification tokens. Use GitHub Actions Secrets for the workflow. The dashboard reads the same state but must stay read-only and must never echo configuration values: `.env*`, `watcha-session.json`, and `siemens-session-*.txt` are equivalent to credentials. Check-in tasks call third-party services and the YongHong flow launches Chrome, so use test accounts and verify service terms before changing request behavior.
+Copy `.env.example` for local configuration and never commit `.env`, passwords, cookies, or notification tokens. Use GitHub Actions Secrets for the workflow. The dashboard reads the same state but must stay read-only and must never echo configuration values: `.env*`, `watcha-session.json`, and `siemens-session-*.txt` are equivalent to credentials. Check-in tasks call third-party services and the YongHong flow launches Chrome, so use test accounts and verify service terms before changing request behavior. Safety state such as `watcha-review-ledger.json` must be written via temp file plus atomic move and must fail closed when unreadable; never treat a corrupt safety file as empty.
 
 ## Commit & Pull Request Guidelines
 

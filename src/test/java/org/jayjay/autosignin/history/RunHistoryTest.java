@@ -13,6 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -29,6 +32,8 @@ import static org.junit.Assert.assertTrue;
  */
 public class RunHistoryTest {
 
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
 
@@ -42,7 +47,7 @@ public class RunHistoryTest {
                 new NotificationSection("云桥签到", Collections.singletonList(
                         new MessageBlock().addLine("账号 1 签到失败：Cookie 失效"))));
 
-        Instant started = Instant.parse("2026-11-27T01:11:02Z");
+        Instant started = Instant.now();
         Path file = RunHistory.record(stateDir, sections, started, started.plusSeconds(158));
 
         assertNotNull(file);
@@ -77,8 +82,8 @@ public class RunHistoryTest {
         List<NotificationSection> sections = Collections.singletonList(
                 new NotificationSection("西门子签到", Collections.singletonList(
                         new MessageBlock().addLine("签到成功"))));
-        Instant first = Instant.parse("2026-11-26T01:11:00Z");
-        Instant second = Instant.parse("2026-11-27T01:11:00Z");
+        Instant second = todayAt(9, 11, 0, 0);
+        Instant first = second.minus(1, ChronoUnit.DAYS);
 
         RunHistory.record(stateDir, sections, first, first.plusSeconds(1));
         RunHistory.record(stateDir, sections, second, second.plusSeconds(1));
@@ -87,8 +92,8 @@ public class RunHistoryTest {
 
         List<JSONObject> records = RunHistory.read(stateDir, 10);
         assertEquals(3, records.size());
-        assertTrue(records.get(0).getStr("startedAt").startsWith("2026-11-27"));
-        assertTrue(records.get(2).getStr("startedAt").startsWith("2026-11-26"));
+        assertTrue(records.get(0).getStr("startedAt").startsWith(today().toString()));
+        assertTrue(records.get(2).getStr("startedAt").startsWith(today().minusDays(1).toString()));
     }
 
     @Test
@@ -133,13 +138,14 @@ public class RunHistoryTest {
         List<NotificationSection> sections = Collections.singletonList(
                 new NotificationSection("西门子签到", Collections.singletonList(
                         new MessageBlock().addLine("签到成功"))));
-        Instant started = Instant.parse("2026-11-27T01:11:02.987654321Z");
+        Instant started = todayAt(9, 11, 2, 987654321);
         RunHistory.record(stateDir, sections, started, started.plusSeconds(158));
 
         JSONObject record = RunHistory.read(stateDir, 1).get(0);
-        assertEquals("2026-11-27T09:11:02+08:00", record.getStr("startedAt"));
-        assertEquals("2026-11-27T09:13:40+08:00", record.getStr("finishedAt"));
-        assertEquals("2026-11-27 09:11:02", RunHistory.displayTime(record.getStr("startedAt")));
+        String date = today().toString();
+        assertEquals(date + "T09:11:02+08:00", record.getStr("startedAt"));
+        assertEquals(date + "T09:13:40+08:00", record.getStr("finishedAt"));
+        assertEquals(date + " 09:11:02", RunHistory.displayTime(record.getStr("startedAt")));
     }
 
     @Test
@@ -151,7 +157,7 @@ public class RunHistoryTest {
                 // 未配置账号的站点会返回空分组
                 new NotificationSection(),
                 new NotificationSection("云桥签到", new ArrayList<>()));
-        Instant now = Instant.parse("2026-11-27T01:11:02Z");
+        Instant now = Instant.now();
         RunHistory.record(stateDir, sections, now, now.plusSeconds(10));
 
         JSONArray recorded = RunHistory.read(stateDir, 1).get(0).getJSONArray("sections");
@@ -169,5 +175,31 @@ public class RunHistoryTest {
         // 直接验证开关语义：环境变量读不到时默认开启。
         assertTrue(RunHistory.enabled());
         assertNotNull(RunHistory.record(stateDir, sections, now, now.plusSeconds(1)));
+    }
+
+    @Test
+    public void 最近结束时间跳过损坏的最新记录() throws Exception {
+        Path stateDir = folder.newFolder("state").toPath();
+        assertNull(RunHistory.latestFinishedAt(stateDir));
+
+        List<NotificationSection> sections = Collections.singletonList(
+                new NotificationSection("西门子签到", Collections.singletonList(
+                        new MessageBlock().addLine("签到成功"))));
+        Instant started = todayAt(9, 11, 0, 0).minus(1, ChronoUnit.DAYS);
+        RunHistory.record(stateDir, sections, started, started.plusSeconds(90));
+        // 进程在写记录时被杀，最新一条只剩半截。
+        Files.write(stateDir.resolve(RunHistory.DIR_NAME).resolve(today() + "T09-11-00.json"),
+                "{\"startedAt\":".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(started.plusSeconds(90), RunHistory.latestFinishedAt(stateDir));
+    }
+
+    private static LocalDate today() {
+        return LocalDate.now(SHANGHAI);
+    }
+
+    /** 记录写入时会按真实日期清理 30 天前的文件，测试用的时间必须跟着当天走。 */
+    private static Instant todayAt(int hour, int minute, int second, int nano) {
+        return today().atTime(hour, minute, second, nano).atZone(SHANGHAI).toInstant();
     }
 }

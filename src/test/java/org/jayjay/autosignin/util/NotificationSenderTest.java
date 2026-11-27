@@ -6,9 +6,16 @@ import org.jayjay.autosignin.entity.MessageLine;
 import org.jayjay.autosignin.entity.NotificationSection;
 import org.junit.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class NotificationSenderTest {
 
@@ -46,5 +53,67 @@ public class NotificationSenderTest {
         assertEquals("签到结果（2 个异常）", sender.buildTitle(java.util.Arrays.asList(
                 new NotificationSection("云桥签到", Collections.singletonList(failed)),
                 new NotificationSection("西门子签到", Collections.singletonList(failed)))));
+    }
+
+    @Test
+    public void oneFailingChannelDoesNotBlockOthers() {
+        List<String> delivered = new ArrayList<String>();
+        NotificationSender sender = new NotificationSender() {
+            @Override
+            public void sendEmail(List<NotificationSection> sections, String title) {
+                throw new IllegalStateException("smtp down");
+            }
+
+            @Override
+            public void sendPushPlus(List<NotificationSection> sections, String title) {
+                delivered.add("PushPlus:" + title);
+            }
+
+            @Override
+            public void sendServerChan(List<NotificationSection> sections, String title) {
+                delivered.add("Server酱:" + title);
+            }
+        };
+
+        sender.send(Collections.singletonList(
+                new NotificationSection("运行检查", Collections.singletonList(MessageBlock.text("26 小时没有运行")))),
+                "签到可能没有运行");
+
+        assertEquals(java.util.Arrays.asList("PushPlus:签到可能没有运行", "Server酱:签到可能没有运行"), delivered);
+    }
+
+    @Test
+    public void failureLogMasksTokens() {
+        NotificationSender sender = new NotificationSender() {
+            @Override
+            public void sendEmail(List<NotificationSection> sections, String title) {
+            }
+
+            @Override
+            public void sendPushPlus(List<NotificationSection> sections, String title) {
+            }
+
+            @Override
+            public void sendServerChan(List<NotificationSection> sections, String title) {
+                throw new IllegalStateException("ConnectException: https://sctapi.ftqq.com/SCT-secret-123.send");
+            }
+        };
+        sender.SERVER_CHAN_TOKEN = "SCT-secret-123";
+        sender.EMAIL_PASSWORD = "x";
+
+        PrintStream original = System.out;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(captured, true));
+        try {
+            sender.send(Collections.singletonList(
+                    new NotificationSection("运行检查", Collections.singletonList(MessageBlock.text("提醒")))));
+        } finally {
+            System.setOut(original);
+        }
+
+        String log = new String(captured.toByteArray(), StandardCharsets.UTF_8);
+        assertTrue(log.contains("Server酱 通知发送失败"));
+        assertFalse("令牌不能出现在日志里", log.contains("SCT-secret-123"));
+        assertTrue("过短的值不参与打码，报错原文要能看懂", log.contains("ConnectException"));
     }
 }

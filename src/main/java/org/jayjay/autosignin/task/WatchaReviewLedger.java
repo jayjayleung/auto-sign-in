@@ -7,7 +7,10 @@ import cn.hutool.json.JSONUtil;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -37,6 +40,8 @@ final class WatchaReviewLedger {
 
     private final List<Entry> published = new ArrayList<Entry>();
     private int strikes;
+    /** 台账文件存在但读不出来。此时按停写处理，且不覆盖原文件，等人看过再删。 */
+    private boolean unreadable;
 
     static WatchaReviewLedger load(File file) {
         WatchaReviewLedger ledger = new WatchaReviewLedger();
@@ -58,12 +63,19 @@ final class WatchaReviewLedger {
                 }
             }
         } catch (Exception e) {
-            System.out.println("[观猹] 台账读取失败，按空台账处理：" + StrUtil.maxLength(e.getMessage(), 100));
+            // 读不出来就当作已经熔断：按空台账处理等于把违规次数清零，安全阀会悄悄失效。
+            ledger.published.clear();
+            ledger.strikes = STRIKE_LIMIT;
+            ledger.unreadable = true;
+            System.out.println("[观猹] 台账读取失败，按停写处理：" + StrUtil.maxLength(e.getMessage(), 100));
         }
         return ledger;
     }
 
     void save(File file) {
+        if (unreadable) {
+            return;
+        }
         try {
             JSONArray array = new JSONArray();
             for (Entry entry : published) {
@@ -78,7 +90,15 @@ final class WatchaReviewLedger {
             if (parent != null && !parent.isDirectory()) {
                 parent.mkdirs();
             }
-            Files.write(file.toPath(), json.toString().getBytes(StandardCharsets.UTF_8));
+            // 先写临时文件再改名：进程在写入途中被终止时，原台账保持完整。
+            Path target = file.toPath();
+            Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+            Files.write(temp, json.toString().getBytes(StandardCharsets.UTF_8));
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (Exception e) {
             System.out.println("[观猹] 台账写入失败：" + StrUtil.maxLength(e.getMessage(), 100));
         }
@@ -115,6 +135,10 @@ final class WatchaReviewLedger {
 
     int strikes() {
         return strikes;
+    }
+
+    boolean unreadable() {
+        return unreadable;
     }
 
     /** 停写结束日期，给通知用。 */
