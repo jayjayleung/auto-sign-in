@@ -17,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -24,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -33,6 +36,7 @@ import static org.junit.Assert.assertTrue;
 public class WatchaCheckInTaskTest {
 
     private HttpServer server;
+    private java.io.File stateDir;
     private String baseUrl;
     private final AtomicInteger checkInRequests = new AtomicInteger();
     private final AtomicInteger balanceRequests = new AtomicInteger();
@@ -51,6 +55,7 @@ public class WatchaCheckInTaskTest {
     private volatile boolean reviewItemClaimed;
     private volatile boolean postingClaimed;
     private volatile boolean thinProducts;
+    private volatile boolean myReviewExists;
     private volatile int weeklyPostCount;
     private volatile boolean postProgressLags;
     private volatile int pendingPosts;
@@ -67,6 +72,9 @@ public class WatchaCheckInTaskTest {
     private volatile boolean searchFails;
     private final AtomicInteger questFetches = new AtomicInteger();
     private final AtomicInteger reviewRequests = new AtomicInteger();
+    private final AtomicInteger reviewPosts = new AtomicInteger();
+    private final AtomicInteger mirrorCalls = new AtomicInteger();
+    private final AtomicReference<String> reviewBody = new AtomicReference<>();
     private final AtomicInteger discussRequests = new AtomicInteger();
     private final AtomicInteger receiveRequests = new AtomicInteger();
     private final AtomicReference<String> aiAuthorization = new AtomicReference<>();
@@ -77,6 +85,8 @@ public class WatchaCheckInTaskTest {
 
     @Before
     public void setUp() throws IOException {
+        stateDir = java.nio.file.Files.createTempDirectory("watcha-test-state").toFile();
+        stateDir.deleteOnExit();
         checkInRequests.set(0);
         balanceRequests.set(0);
         claimedGuazi.set(0);
@@ -98,6 +108,11 @@ public class WatchaCheckInTaskTest {
         postProgressLags = false;
         pendingPosts = 0;
         aiMode = "ok";
+        reviewPosts.set(0);
+        reviewRequests.set(0);
+        mirrorCalls.set(0);
+        reviewBody.set(null);
+        myReviewExists = false;
         postedToday = false;
         postedYesterday = false;
         userPostsFail = false;
@@ -125,6 +140,63 @@ public class WatchaCheckInTaskTest {
         server.createContext("/api/v2/promotions/balances", this::handleBalances);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+    }
+
+    @Test
+    public void publishesReviewThatMatchesThePlan() throws Exception {
+        Map<String, String> environment = accountWithAi();
+        environment.put("WATCHA_PUBLISH_POST", "false");
+        environment.put("WATCHA_AUTO_REVIEW", "false");
+        environment.put("WATCHA_PUBLISH_REVIEW", "true");
+        environment.put("WATCHA_REVIEW_FORCE", "true");
+        environment.put("WATCHA_REVIEW_DELAY_MINUTES", "0");
+        environment.put("WATCHA_REPLY_RATE", "0");
+        environment.put("WATCHA_REVIEW_OFF_QUEST_RATE", "0");
+
+        questTask(environment).run();
+
+        assertEquals("应当只发一条猹评", 1, reviewPosts.get());
+        JSONObject body = JSONUtil.parseObj(reviewBody.get());
+        JSONArray blocks = body.getJSONObject("content").getJSONArray("content");
+        assertTrue("正文至少一段", blocks.size() >= 1);
+        for (int index = 0; index < blocks.size(); index++) {
+            JSONObject block = blocks.getJSONObject(index);
+            assertTrue("只允许 paragraph/heading/blockquote 三种块",
+                    Arrays.asList("paragraph", "heading", "blockquote").contains(block.getStr("type")));
+        }
+        int vote = body.getInt("vote_value", 0);
+        assertTrue("投票只能是 1 或 2", vote == 1 || vote == 2);
+        String images = body.getStr("images", "");
+        assertTrue("图片要么为空，要么是镜像后的站内图：" + images,
+                images.isEmpty() || images.startsWith("https://tos.watcha.cn/external-images/"));
+        assertTrue("台账要记下这条", new String(java.nio.file.Files.readAllBytes(
+                new java.io.File(stateDir, "watcha-review-ledger.json").toPath()), java.nio.charset.StandardCharsets.UTF_8)
+                .contains("\"id\":9001"));
+    }
+
+    @Test
+    public void stopsPublishingAfterTwoLostReviews() throws Exception {
+        java.io.File ledger = new java.io.File(stateDir, "watcha-review-ledger.json");
+        java.nio.file.Files.write(ledger.toPath(),
+                ("{\"strikes\":2,\"published\":[{\"id\":100,\"product_id\":7,"
+                        + "\"created_at\":\"2026-10-01T00:00:00Z\",\"gone\":true}]}")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        Map<String, String> environment = accountWithAi();
+        environment.put("WATCHA_PUBLISH_POST", "false");
+        environment.put("WATCHA_AUTO_REVIEW", "false");
+        environment.put("WATCHA_PUBLISH_REVIEW", "true");
+        environment.put("WATCHA_REVIEW_FORCE", "true");
+        environment.put("WATCHA_REVIEW_DELAY_MINUTES", "0");
+
+        WatchaCheckInTask task = questTask(environment);
+        task.run();
+
+        assertEquals("熔断后不该再发猹评", 0, reviewPosts.get());
+        boolean warned = task.getMessageBlocks().stream()
+                .flatMap(block -> block.getLines().stream())
+                .anyMatch(line -> line.toPlainText().contains("已自动停写"));
+        assertTrue("通知里要说明已停写", warned);
     }
 
     @After
@@ -775,12 +847,16 @@ public class WatchaCheckInTaskTest {
         });
         server.createContext("/search", this::handleSearch);
         server.createContext("/api/v2/users/10174946/posts", this::handleUserPosts);
+        server.createContext("/api/v2/infra/external-resources/image", this::handleMirror);
+        server.createContext("/site", this::handleTrialSite);
     }
 
     private Map<String, String> account() {
         Map<String, String> environment = new HashMap<>();
         environment.put("WATCHA_USERNAME", "user@example.com");
         environment.put("WATCHA_PASSWORD", "secret-password");
+        // 状态目录指到临时目录，别让测试读到真实的会话和台账
+        environment.put("WATCHA_STATE_DIR", stateDir.getAbsolutePath());
         return environment;
     }
 
@@ -898,10 +974,25 @@ public class WatchaCheckInTaskTest {
 
     private void handleProduct(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        readBody(exchange);
+        // 请求体只读一次：再读一次会把流读空，客户端看到的是「Unexpected end of file」
+        String requestBody = readBody(exchange);
         int id = productId(path);
+        if (path.endsWith("/reviews/user")) {
+            String body = myReviewExists
+                    ? "{\"statusCode\":200,\"data\":{\"reviews\":[{\"id\":9001}]}}"
+                    : "{\"statusCode\":200,\"data\":{\"reviews\":[]}}";
+            json(exchange, 200, body);
+            return;
+        }
         if (path.contains("/reviews")) {
             reviewRequests.incrementAndGet();
+            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                reviewBody.set(requestBody);
+                reviewPosts.incrementAndGet();
+                myReviewExists = true;
+                json(exchange, 200, "{\"statusCode\":200,\"data\":{\"id\":9001}}");
+                return;
+            }
             json(exchange, 405, "{\"statusCode\":405}");
             return;
         }
@@ -912,7 +1003,9 @@ public class WatchaCheckInTaskTest {
                 .set("name", name)
                 .set("slogan", "看看它解决什么")
                 .set("description", description)
-                .set("categories", JSONUtil.createArray().put(JSONUtil.createObj().set("name", "效率工具")));
+                .set("categories", JSONUtil.createArray().put(JSONUtil.createObj().set("name", "效率工具")))
+                .set("website_url", baseUrl + "/site")
+                .set("image_url", baseUrl + "/site/cover.png");
         json(exchange, 200, JSONUtil.createObj().set("statusCode", 200).set("data", product).toString());
     }
 
@@ -927,8 +1020,38 @@ public class WatchaCheckInTaskTest {
         json(exchange, 200, "{\"statusCode\":200,\"data\":{\"id\":21}}");
     }
 
+    /** 试用采集用的假官网，带 og:image。 */
+    private void handleTrialSite(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        if (path.endsWith("/cover.png")) {
+            exchange.getResponseHeaders().add("Content-Type", "image/png");
+            byte[] bytes = new byte[]{(byte) 0x89, 'P', 'N', 'G'};
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
+            return;
+        }
+        html(exchange, 200, "<html><head><title>切问官网</title>"
+                + "<meta property=\"og:image\" content=\"" + baseUrl + "/site/cover.png\">"
+                + "<meta name=\"description\" content=\"面向科研人员的检索工具\">"
+                + "</head><body><h1>切问</h1><p>深度检索，整理依据</p></body></html>");
+    }
+
+    private void handleMirror(HttpExchange exchange) throws IOException {
+        mirrorCalls.incrementAndGet();
+        json(exchange, 200, "{\"statusCode\":200,\"data\":{\"url\":"
+                + "\"https://tos.watcha.cn/external-images/test/hash.png\"}}");
+    }
+
     private void handleAi(HttpExchange exchange) throws IOException {
         String request = readBody(exchange);
+        if (request.contains("体裁：猹评")) {
+            aiBodies.add(request);
+            aiRequests.incrementAndGet();
+            json(exchange, 200, reviewAiResponse(request));
+            return;
+        }
         aiRequests.incrementAndGet();
         aiBodies.add(request);
         aiAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
@@ -951,6 +1074,41 @@ public class WatchaCheckInTaskTest {
         JSONObject message = JSONUtil.createObj().set("content", text);
         JSONArray choices = JSONUtil.createArray().put(JSONUtil.createObj().set("message", message));
         json(exchange, 200, JSONUtil.createObj().set("choices", choices).toString());
+    }
+
+    /**
+     * 按提示词里要求的段数和字数生成一条猹评，形状必须和计划一致，否则本地校验会打回。
+     */
+    private String reviewAiResponse(String request) {
+        int paragraphs = 2;
+        int min = 60;
+        int max = 200;
+        Matcher matcher = Pattern.compile("写 (\\d+) 段，合计约 \\d+ 个字（(\\d+) 到 (\\d+) 字之间）")
+                .matcher(request);
+        if (matcher.find()) {
+            paragraphs = Integer.parseInt(matcher.group(1));
+            min = Integer.parseInt(matcher.group(2));
+            max = Integer.parseInt(matcher.group(3));
+        }
+        int target = Math.max(min, Math.min(max, (min + max) / 2));
+        String fill = "我用切问把同一批资料过了两遍，第二遍明显快一些。";
+        StringBuilder all = new StringBuilder();
+        while (all.length() < target) {
+            all.append(fill);
+        }
+        String text = all.substring(0, target);
+        JSONArray lines = JSONUtil.createArray();
+        int each = Math.max(1, text.length() / paragraphs);
+        for (int index = 0; index < paragraphs; index++) {
+            int from = index * each;
+            int to = index == paragraphs - 1 ? text.length() : Math.min(text.length(), from + each);
+            lines.add(text.substring(from, to));
+        }
+        JSONObject payload = JSONUtil.createObj().set("paragraphs", lines).set("heading", "用了一周的感受");
+        return JSONUtil.createObj()
+                .set("choices", JSONUtil.createArray().put(
+                        JSONUtil.createObj().set("message", JSONUtil.createObj().set("content", payload.toString()))))
+                .toString();
     }
 
     private void handleSearch(HttpExchange exchange) throws IOException {
