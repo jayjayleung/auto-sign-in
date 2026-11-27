@@ -13,8 +13,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -941,18 +939,6 @@ public class SiemensCheckInTask extends CheckInTask {
     private Path runMarkerPath(String username) {
         String key = sha1Hex(username).substring(0, 12);
         return stateDir().resolve("siemens-ran-" + key + ".txt");
-    }
-
-    /**
-     * 状态文件目录。容器里 /app 在重启后仍然保留，只有重建镜像或 docker compose down
-     * 才会丢；本地运行时退回系统临时目录。
-     */
-    static Path stateDir() {
-        Path app = Paths.get("/app");
-        if (Files.isDirectory(app) && Files.isWritable(app)) {
-            return app.resolve("state");
-        }
-        return Paths.get(System.getProperty("java.io.tmpdir"), "auto-sign-in");
     }
 
     /**
@@ -2119,20 +2105,6 @@ public class SiemensCheckInTask extends CheckInTask {
         headers.put("Origin", origin(supportBaseUrl));
         headers.put("Referer", referer);
         return headers;
-    }
-
-    static String sha1Hex(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-1");
-            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(bytes.length * 2);
-            for (byte item : bytes) {
-                hex.append(String.format("%02x", item & 0xff));
-            }
-            return hex.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     static String resolveUrl(String current, String location) {

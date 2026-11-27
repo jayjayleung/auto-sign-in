@@ -9,6 +9,11 @@ import org.jayjay.autosignin.entity.MessageLine;
 import org.jayjay.autosignin.entity.NotificationSection;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -129,6 +134,40 @@ public abstract class CheckInTask {
      */
     public NotificationSection buildNotificationSection() {
         return new NotificationSection("签到", messageBlocks);
+    }
+
+    /**
+     * 状态文件目录。容器里 /app 在重启后仍然保留，只有重建镜像或 docker compose down
+     * 才会丢；本地运行时退回系统临时目录。
+     */
+    static Path stateDir() {
+        Path app = Paths.get("/app");
+        if (Files.isDirectory(app) && Files.isWritable(app)) {
+            return app.resolve("state");
+        }
+        return Paths.get(System.getProperty("java.io.tmpdir"), "auto-sign-in");
+    }
+
+    /**
+     * 账号维度的文件名后缀。多账号在同一容器里共用状态目录，
+     * 用账号哈希区分可以避免不同账号的凭证互相覆盖，也不会把账号明文写进文件名。
+     */
+    static String accountKey(String account) {
+        return sha1Hex(StrUtil.trimToEmpty(account)).substring(0, 12);
+    }
+
+    static String sha1Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-1");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte item : bytes) {
+                hex.append(String.format("%02x", item & 0xff));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
 }
