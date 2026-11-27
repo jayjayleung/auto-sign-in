@@ -42,3 +42,31 @@ services:
 #        max-size: "50m"
 #        max-file: "3"
 #    restart: always
+
+# 只读看板：复用同一个镜像，把三个实例的 state 和配置只读挂进来。
+# 先把 .env.dashboard.example 复制成 .env.dashboard 并设置 DASHBOARD_USER / DASHBOARD_PASSWORD，
+# 否则容器会因缺少账号口令而拒绝启动。
+#  auto-sign-in-dashboard:
+#    build: .
+#    container_name: auto-sign-in-dashboard
+#    entrypoint: ["java", "-cp", "/app/app.jar", "org.jayjay.autosignin.dashboard.DashboardServer"]
+#    env_file:
+#      - .env.dashboard
+#    volumes:
+#      - ./state:/app/dashboard-state:ro
+#      - ./.env:/app/dashboard-config/.env:ro
+#      - ./.env.fanfan:/app/dashboard-config/.env.fanfan:ro
+#      - ./.env.no1:/app/dashboard-config/.env.no1:ro
+#    environment:
+#      - TZ=Asia/Shanghai
+#      - DASHBOARD_PORT=8090
+#      - DASHBOARD_INSTANCES=auto-sign-in,auto-sign-in-fanfan,auto-sign-in-no1
+#    ports:
+#      # 绑所有网卡方便手机/局域网访问；不需要外部访问时改回 127.0.0.1:8090:8090
+#      - 8090:8090
+#    logging:
+#      driver: json-file
+#      options:
+#        max-size: "10m"
+#        max-file: "2"
+#    restart: always
