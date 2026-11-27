@@ -162,7 +162,7 @@ public final class DashboardServer {
                         + "<p>在工作区创建 <code>.env.dashboard</code> 并填入账号和口令：</p>"
                         + "<pre>cp .env.dashboard.example .env.dashboard\n"
                         + "# 编辑 .env.dashboard，设置 DASHBOARD_USER 和 DASHBOARD_PASSWORD\n"
-                        + "docker compose up -d auto-sign-in-dashboard</pre>"
+                        + "docker compose --profile dashboard up -d auto-sign-in-dashboard</pre>"
                         + "<p class=\"muted\">口令请用 16 位以上随机串，不要与签到账号相同。</p>"
                         + "</body></html>";
                 Routes.Reply.text(200, "text/html;charset=utf-8", hint).writeTo(exchange);

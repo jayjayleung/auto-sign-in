@@ -43,11 +43,12 @@ services:
 #        max-file: "3"
 #    restart: always
 
-# 只读看板（可选）：复用同一个镜像，把三个实例的 state 和配置只读挂进来。
-# 启用前先准备口令文件，否则打开 8090 只会看到一个配置提示页：
-#   cp .env.dashboard.example .env.dashboard   然后填 DASHBOARD_USER / DASHBOARD_PASSWORD
-# 没建这个文件也能正常用：此服务的 env_file 标了 required: false，签到容器不受影响。
+# 只读看板（可选附加，默认不启动）。
+# 启用方式：先在 .env.dashboard 里配好 DASHBOARD_USER / DASHBOARD_PASSWORD，然后
+#   docker compose --profile dashboard up -d auto-sign-in-dashboard
+# 加了 profile 后，不带 --profile 的 `docker compose up -d` 只会起签到容器，看板不参与。
 #  auto-sign-in-dashboard:
+#    profiles: ["dashboard"]
 #    build: .
 #    container_name: auto-sign-in-dashboard
 #    entrypoint: ["java", "-cp", "/app/app.jar", "org.jayjay.autosignin.dashboard.DashboardServer"]

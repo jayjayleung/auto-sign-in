@@ -240,18 +240,26 @@ docker compose down
 
 如果你不想使用 Docker，也可以自行打包后通过系统定时任务运行 JAR。构建需要 JDK 17+，运行需要 Java 17+，并可通过 `crontab` 或 `systemd timer` 做定时触发。
 
-### 只读看板（可选）
+### 只读看板（可选附加）
 
 签到结果除了推送，还会写一份到 `state/run-history/`（可用 `RUN_HISTORY_ENABLED=false` 关闭），
 运行日志同时落一份到 `state/logs/<日期>.log`。
 容器重建会清空 `docker logs`，但这两份文件在挂载的 `state/` 里，不会丢。
-基于它们和 state 目录里的其它状态，可以起一个只读看板查看今日是否已跑、内容库水位、互评闭环、最近一次结果和运行日志：
+
+看板是可选的附加服务，**默认不启动**：直接 `docker compose up -d` 只会起签到容器。
+需要时按下面两步单独开：
 
 ```bash
 cp .env.dashboard.example .env.dashboard   # 填好 DASHBOARD_USER 和 DASHBOARD_PASSWORD
-docker compose up -d auto-sign-in-dashboard
+docker compose --profile dashboard up -d auto-sign-in-dashboard
 # 本机：http://127.0.0.1:8090/
 # 局域网：http://<本机 IP>:8090/
+```
+
+关掉看板不影响签到：
+
+```bash
+docker compose --profile dashboard stop auto-sign-in-dashboard
 ```
 
 口令文件缺失时看板不会崩溃或反复重启，而是在 8090 上给出配置提示页，`/health` 返回 503。
@@ -269,8 +277,7 @@ docker compose up -d auto-sign-in-dashboard
 | `/config` | 多实例配置并排对比 |
 
 - 访问需要账号口令，口令只从 `.env.dashboard` 读取。
-- 没建 `.env.dashboard` 也能跑：看板会在 8090 给出配置提示页，接口一律 503，
-  签到容器完全不受影响；建好文件后执行 `docker compose up -d auto-sign-in-dashboard` 即可。
+- 没建 `.env.dashboard` 也能跑：看板会在 8090 给出配置提示页，接口一律 503；建好文件后重新启用即可。
 - 默认绑所有网卡，同一局域网可以直接用手机或别的电脑打开。
 - 只在内网使用。若这台机器有公网 IP，务必改回 `127.0.0.1:8090:8090` 再用 SSH 隧道访问。
 - 页面只显示「已配置/未配置」，不会回显任何密码、Cookie 或令牌；接口有单元测试守住这条。
