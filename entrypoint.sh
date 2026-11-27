@@ -32,6 +32,15 @@ done
 # 默认北京时间每天 9:11 执行，可通过 CRON_SCHEDULE 环境变量自定义
 CRON_SCHEDULE="${CRON_SCHEDULE:-11 9 * * *}"
 
+# 「没跑」检查：每天看一次运行记录，太久没有完成的运行就单独推送提醒；设为 off 关闭。
+# 放在签到之后足够久的时间点，运行偶尔变慢或卡住也能被这一次检查覆盖到。
+STALE_CHECK_SCHEDULE="${STALE_CHECK_SCHEDULE:-0 20 * * *}"
+
+# 西门子锁定探测：站点锁定不写期限，每天只读访问一次兑换页，攒出「第一次锁定」到「恢复」的间隔。
+# 只发一个 GET、用已保存的会话，不登录也不提交任何东西，所以可以放心放在任意时间点。
+SIEMENS_LOCK_PROBE_SCHEDULE="${SIEMENS_LOCK_PROBE_SCHEDULE:-0 12 * * *}"
+
+
 # 运行日志同时写两份：容器主进程 stdout（docker logs 能看）和 state 目录下按天分的文件。
 # 容器重建会把 stdout 的历史清空，宿主机上挂载的 state 文件才不会丢，看板也读它。
 LOG_DIR=/app/state/logs
@@ -46,11 +55,20 @@ LOG_DIR=/app/state/logs
   echo "SHELL=/bin/bash"
   echo "TZ=${TZ:-Asia/Shanghai}"
   echo "$CRON_SCHEDULE root mkdir -p $LOG_DIR && . $ENV_FILE && java -jar /app/app.jar 2>&1 | tee -a $LOG_DIR/\$(date +\\%F).log >> /proc/1/fd/1; echo \"[\$(date)] running finished...\" >> /proc/1/fd/1"
+  if [ "$STALE_CHECK_SCHEDULE" != "off" ]; then
+    echo "$STALE_CHECK_SCHEDULE root mkdir -p $LOG_DIR && . $ENV_FILE && java -cp /app/app.jar org.jayjay.autosignin.StaleRunCheck 2>&1 | tee -a $LOG_DIR/\$(date +\\%F).log >> /proc/1/fd/1"
+  fi
+  if [ "$SIEMENS_LOCK_PROBE_SCHEDULE" != "off" ]; then
+    echo "$SIEMENS_LOCK_PROBE_SCHEDULE root mkdir -p $LOG_DIR && . $ENV_FILE && java -cp /app/app.jar org.jayjay.autosignin.task.SiemensLockProbe 2>&1 | tee -a $LOG_DIR/\$(date +\\%F).log >> /proc/1/fd/1"
+  fi
 } > /etc/cron.d/auto-sign-in
 chmod 0644 /etc/cron.d/auto-sign-in
 mkdir -p "$LOG_DIR"
 
 echo "[$(date)] cron scheduled: $CRON_SCHEDULE"
+echo "[$(date)] stale check scheduled: $STALE_CHECK_SCHEDULE"
+echo "[$(date)] siemens lock probe scheduled: $SIEMENS_LOCK_PROBE_SCHEDULE"
+
 
 # === 3. 可选：启动时立即执行一次 ===
 if [ "${RUN_ON_STARTUP:-false}" = "true" ]; then

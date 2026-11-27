@@ -6,6 +6,7 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import org.jayjay.autosignin.history.RunHistory;
+import org.jayjay.autosignin.task.SiemensLockProbe;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,6 +28,8 @@ import java.util.Set;
 final class InstanceState {
 
     private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+    /** 探测历史给页面留最近多少条，一天一条，够看两周。 */
+    private static final int LOCK_HISTORY_LIMIT = 14;
 
     private final String name;
     private final Path dir;
@@ -69,6 +72,7 @@ final class InstanceState {
         json.set("exceptionCount", lastRun.getInt("exceptionCount", 0));
         json.set("ranToday", siemens.getBool("ranToday", false));
         json.set("paused", watcha.getBool("paused", false));
+        json.set("siemensLocked", siemens.getBool("locked", false));
         json.set("health", health(siemens, watcha, lastRun));
         return json;
     }
@@ -102,6 +106,11 @@ final class InstanceState {
         if (streak >= 2) {
             problems.add("故事帖连败 " + streak);
         }
+        if (siemens.getBool("locked", false)) {
+            // 站点锁定时签到还能过，但提问题、发帖、兑换这些动作全会被拦，
+            // 每日任务一天撞十几次锁只会加重风险，必须在概览页就能看见。
+            problems.add("西门子账号被站点锁定");
+        }
         if (lastRun.getBool("hasRecord", false) && lastRun.getInt("exceptionCount", 0) > 0) {
             problems.add(lastRun.getInt("exceptionCount", 0) + " 个站点异常");
         }
@@ -128,7 +137,66 @@ final class InstanceState {
         if (session != null) {
             json.set("sessionUpdatedAt", StateFiles.modifiedText(session));
         }
+        JSONObject lock = lock();
+        json.set("lock", lock);
+        // 提一层到西门子节点上，前端判断「要不要显示红字」不用再往里钻。
+        json.set("locked", "locked".equals(lock.getStr("status")));
         return json;
+    }
+
+    /**
+     * 站点锁定探测的结果，来自 {@code siemens-lock-<账号哈希>.json}。
+     * <p>
+     * 站点锁定不写期限，只能靠每天探一次攒出「第一次看到锁定」到「恢复」的间隔，
+     * 这个间隔就是站点实际给的处置时长，所以两个时间点都要原样给到页面。
+     */
+    JSONObject lock() {
+        JSONObject json = new JSONObject();
+        Path file = dir == null ? null : StateFiles.latest(dir, SiemensLockProbe.FILE_PREFIX);
+        if (!StateFiles.exists(file)) {
+            json.set("status", "unknown");
+            json.set("checked", false);
+            return json;
+        }
+        json.set("checked", true);
+        try {
+            JSONObject data = JSONUtil.parseObj(StateFiles.text(file));
+            String status = StrUtil.blankToDefault(data.getStr("status"), "unknown");
+            json.set("status", status);
+            json.set("checkedAt", RunHistory.displayTime(data.getStr("checkedAt")));
+            json.set("firstSeenLocked", RunHistory.displayTime(data.getStr("firstSeenLocked")));
+            json.set("lastLockedAt", RunHistory.displayTime(data.getStr("lastLockedAt")));
+            json.set("unlockedAt", RunHistory.displayTime(data.getStr("unlockedAt")));
+            Long days = SiemensLockProbe.lockedDays(data.getStr("firstSeenLocked"), data.getStr("unlockedAt"));
+            if (days != null) {
+                json.set("lockedDays", days);
+            }
+            json.set("history", historyOf(data.getJSONArray("history")));
+        } catch (Exception e) {
+            // 探测文件坏了不能显示成「未锁定」，那会让人以为可以放心跑每日任务。
+            json.set("status", "unknown");
+            json.set("error", "探测记录解析失败");
+        }
+        return json;
+    }
+
+    /** 探测历史只留最近若干条给页面，避免把整份记录塞进摘要接口。 */
+    private static JSONArray historyOf(JSONArray saved) {
+        JSONArray rows = new JSONArray();
+        if (saved == null) {
+            return rows;
+        }
+        int from = Math.max(0, saved.size() - LOCK_HISTORY_LIMIT);
+        for (int index = from; index < saved.size(); index++) {
+            JSONObject item = saved.getJSONObject(index);
+            if (item == null) {
+                continue;
+            }
+            rows.add(new JSONObject()
+                    .set("at", RunHistory.displayTime(item.getStr("at")))
+                    .set("status", StrUtil.blankToDefault(item.getStr("status"), "unknown")));
+        }
+        return rows;
     }
 
     // ==================== 内容库 ====================
@@ -228,7 +296,10 @@ final class InstanceState {
                 json.set("paused", strikes >= 2);
                 json.set("ledgerUpdatedAt", StateFiles.modifiedText(ledger));
             } catch (Exception e) {
+                // 与任务侧一致：台账读不出来时任务会按停写处理，看板不能显示成「无违规」。
                 json.set("error", "台账解析失败");
+                json.set("unreadable", true);
+                json.set("paused", true);
             }
         } else {
             // 没有台账说明还没发过猹评或已经人工清空，等于 0 违规。

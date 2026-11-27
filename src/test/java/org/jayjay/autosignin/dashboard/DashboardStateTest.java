@@ -83,6 +83,90 @@ public class DashboardStateTest {
         assertFalse(siemens.getBool("ranToday"));
     }
 
+    @Test
+    public void 没探测记录时锁定状态为未探测() throws Exception {
+        prepare();
+        JSONObject lock = instanceSummary().getJSONObject("siemens").getJSONObject("lock");
+        assertEquals("unknown", lock.getStr("status"));
+        assertFalse(lock.getBool("checked"));
+        // 没探测过不能算「已锁定」，否则概览页会在全新部署时误报
+        assertFalse(instanceSummary().getBool("siemensLocked"));
+    }
+
+    @Test
+    public void 探测到锁定时体现在概要和健康度里() throws Exception {
+        prepare();
+        Files.write(stateRoot.resolve("auto-sign-in/siemens-lock-abc123.json"), (
+                "{\"status\":\"locked\","
+                        + "\"checkedAt\":\"2026-11-27T12:00:00+08:00\","
+                        + "\"firstSeenLocked\":\"2026-11-25T12:00:00+08:00\","
+                        + "\"lastLockedAt\":\"2026-11-27T12:00:00+08:00\","
+                        + "\"unlockedAt\":\"\","
+                        + "\"history\":[{\"at\":\"2026-11-26T12:00:00+08:00\",\"status\":\"locked\"},"
+                        + "{\"at\":\"2026-11-27T12:00:00+08:00\",\"status\":\"locked\"}]}")
+                .getBytes(StandardCharsets.UTF_8));
+
+        JSONObject summary = instanceSummary();
+        assertTrue("概览页要能直接看到锁定", summary.getBool("siemensLocked"));
+        JSONObject lock = summary.getJSONObject("siemens").getJSONObject("lock");
+        assertTrue(lock.getBool("checked"));
+        assertEquals("locked", lock.getStr("status"));
+        assertTrue(lock.getStr("checkedAt").startsWith("2026-11-27"));
+        assertTrue(lock.getStr("firstSeenLocked").startsWith("2026-11-25"));
+        assertNotNull(lock.getLong("lockedDays"));
+        assertEquals(2, lock.getJSONArray("history").size());
+        assertTrue(summary.getJSONObject("health").getJSONArray("problems").contains("西门子账号被站点锁定"));
+    }
+
+    @Test
+    public void 解锁后锁定天数按恢复日计算() throws Exception {
+        prepare();
+        Files.write(stateRoot.resolve("auto-sign-in/siemens-lock-abc123.json"), (
+                "{\"status\":\"unlocked\","
+                        + "\"checkedAt\":\"2026-12-04T12:00:00+08:00\","
+                        + "\"firstSeenLocked\":\"2026-11-27T12:00:00+08:00\","
+                        + "\"lastLockedAt\":\"2026-12-03T12:00:00+08:00\","
+                        + "\"unlockedAt\":\"2026-12-04T12:00:00+08:00\"}")
+                .getBytes(StandardCharsets.UTF_8));
+
+        JSONObject summary = instanceSummary();
+        assertFalse(summary.getBool("siemensLocked"));
+        JSONObject lock = summary.getJSONObject("siemens").getJSONObject("lock");
+        assertEquals("unlocked", lock.getStr("status"));
+        assertEquals(7L, lock.getLong("lockedDays").longValue());
+        assertFalse(summary.getJSONObject("health").getJSONArray("problems").contains("西门子账号被站点锁定"));
+    }
+
+    @Test
+    public void 探测记录损坏时不显示成未锁定() throws Exception {
+        prepare();
+        Files.write(stateRoot.resolve("auto-sign-in/siemens-lock-abc123.json"),
+                "{\"status\":\"locked\",".getBytes(StandardCharsets.UTF_8));
+
+        JSONObject lock = instanceSummary().getJSONObject("siemens").getJSONObject("lock");
+        // 解析失败不能给出「正常」的判断，只能标成不确定
+        assertEquals("unknown", lock.getStr("status"));
+        assertFalse(instanceSummary().getBool("siemensLocked"));
+    }
+
+    @Test
+    public void 概览汇总锁定实例数() throws Exception {
+        prepare();
+        Files.createDirectories(stateRoot.resolve("auto-sign-in-fanfan"));
+        DashboardState multi = new DashboardState(stateRoot,
+                Arrays.asList("auto-sign-in", "auto-sign-in-fanfan"), configDir);
+        Files.write(stateRoot.resolve("auto-sign-in/siemens-lock-a.json"),
+                "{\"status\":\"locked\",\"checkedAt\":\"2026-11-27T12:00:00+08:00\"}"
+                        .getBytes(StandardCharsets.UTF_8));
+        Files.write(stateRoot.resolve("auto-sign-in-fanfan/siemens-lock-b.json"),
+                "{\"status\":\"unlocked\",\"checkedAt\":\"2026-11-27T12:00:00+08:00\"}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        JSONObject totals = multi.overview().getJSONObject("totals");
+        assertEquals(1, totals.getInt("siemensLocked").intValue());
+        assertEquals(2, totals.getInt("instances").intValue());
+    }
+
     // ==================== 内容库 ====================
 
     @Test
@@ -154,6 +238,18 @@ public class DashboardStateTest {
         assertTrue(watcha.getBool("paused"));
         // 停写必须体现在健康度里，否则概览页会漏报
         assertTrue(summary.getBool("paused"));
+        assertTrue(summary.getJSONObject("health").getJSONArray("problems").contains("猹评已停写"));
+    }
+
+    @Test
+    public void 台账读不出来时按停写显示() throws Exception {
+        prepare();
+        Files.write(stateRoot.resolve("auto-sign-in/watcha-review-ledger.json"),
+                "{\"strikes\":0,\"published\":[".getBytes(StandardCharsets.UTF_8));
+
+        JSONObject summary = instanceSummary();
+        assertTrue(summary.getJSONObject("watcha").getBool("unreadable"));
+        assertTrue("任务侧读不出台账会停写，看板不能显示成无违规", summary.getBool("paused"));
         assertTrue(summary.getJSONObject("health").getJSONArray("problems").contains("猹评已停写"));
     }
 

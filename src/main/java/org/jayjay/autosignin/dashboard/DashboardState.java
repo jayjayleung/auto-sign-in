@@ -67,6 +67,7 @@ final class DashboardState {
         int withTodayRecord = 0;
         int exceptions = 0;
         int paused = 0;
+        int locked = 0;
         for (String name : instances) {
             JSONObject summary = instance(name).summary();
             list.add(summary);
@@ -81,6 +82,9 @@ final class DashboardState {
             if (summary.getBool("paused", false)) {
                 paused++;
             }
+            if (summary.getBool("siemensLocked", false)) {
+                locked++;
+            }
         }
         root.set("instances", list);
         root.set("totals", new JSONObject()
@@ -88,7 +92,9 @@ final class DashboardState {
                 .set("ranToday", ranToday)
                 .set("withTodayRecord", withTodayRecord)
                 .set("exceptions", exceptions)
-                .set("paused", paused));
+                .set("paused", paused)
+                .set("siemensLocked", locked));
+
         root.set("pipeline", pipeline());
         return root;
     }

@@ -15,6 +15,13 @@ export async function renderOverview(container) {
             ? pill(`${totals.exceptions} 个异常`, 'bad')
             : pill('无异常', 'ok');
 
+    const lockedNames = instances.filter((item) => item.siemensLocked).map((item) => item.name);
+    const lockCard = card('西门子站点锁定', `<div class="stat">${totals.siemensLocked || 0} / ${totals.instances || 0}</div>
+        <div class="sub">${(totals.siemensLocked || 0) > 0
+            ? pill(`${lockedNames.join('、')} 被拦`, 'bad')
+            : pill('未发现锁定', 'ok')}</div>
+        <div class="sub" style="margin-top:8px">锁定期间签到能过，但提问、回答、发帖、兑换都会被站点拦下</div>`);
+
     const statCards = `<div class="grid cols-3">
         ${card('今日西门子', `<div class="stat">${totals.ranToday || 0} / ${totals.instances || 0}</div>
             <div class="sub">${totals.ranToday === totals.instances ? '全部已执行' : '仍有实例未执行'}</div>`)}
@@ -24,7 +31,9 @@ export async function renderOverview(container) {
             <div class="sub">${totals.paused > 0
                 ? pill(`${totals.paused} 个实例停写中`, 'bad')
                 : pill('无 strikes 触顶', 'ok')}</div>`)}
+        ${lockCard}
     </div>`;
+
 
     const rows = instances.map((item) => {
         const lastRun = item.lastRun || {};
@@ -32,7 +41,9 @@ export async function renderOverview(container) {
         return [
             link(`/instances/${encodeURIComponent(item.name)}`, esc(item.name)),
             item.ranToday ? pill('今日已跑', 'ok') : pill(item.siemens && item.siemens.lastRunDate ? `上次 ${item.siemens.lastRunDate}` : '无记录', 'warn'),
+            item.siemensLocked ? pill('被锁定', 'bad') : pill('正常', 'ok'),
             lastRun.hasRecord
+
                 ? `${esc(lastRun.finishedAt)}<div class="sub">耗时 ${duration(lastRun.durationSeconds)}</div>`
                 : pill('等待下一次运行', 'mute'),
             { num: true, html: lastRun.exceptionCount > 0 ? pill(`${lastRun.exceptionCount}`, 'bad') : esc(lastRun.exceptionCount || 0) },
@@ -47,11 +58,13 @@ export async function renderOverview(container) {
         + card('', table([
             { label: '实例' },
             { label: '西门子' },
+            { label: '站点锁定' },
             { label: '最近运行' },
             { label: '异常', num: true },
             { label: '内容库可用', num: true },
             { label: '健康度' }
         ], rows))
+
         + `<div class="section-title">互评闭环</div>`
         + card('', pipelineCard(data.pipeline));
 }
