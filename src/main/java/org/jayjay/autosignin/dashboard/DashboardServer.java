@@ -69,12 +69,17 @@ public final class DashboardServer {
     public static void main(String[] args) throws IOException {
         String user = System.getenv(USER_KEY);
         String password = System.getenv(PASSWORD_KEY);
-        if (StrUtil.isBlank(user) || StrUtil.isBlank(password)) {
-            System.out.println("[看板] 未配置 " + USER_KEY + " / " + PASSWORD_KEY + "，拒绝以无鉴权方式启动");
-            System.exit(2);
-        }
         int port = intValue(System.getenv(PORT_KEY), 8090);
         String bind = StrUtil.blankToDefault(StrUtil.trimToEmpty(System.getenv(BIND_KEY)), "0.0.0.0");
+        if (StrUtil.isBlank(user) || StrUtil.isBlank(password)) {
+            // 没配口令时不能裸奔，也不能直接退出——容器配了 restart: always 会变成无限重启，
+            // 反复重启反而比停着更难排查。这里起一个只给提示的服务，所有接口一律 503。
+            System.out.println("[看板] 未配置 " + USER_KEY + " / " + PASSWORD_KEY
+                    + "，仅提供配置提示页，接口一律拒绝");
+            new DashboardServer(new DashboardState(null, new ArrayList<String>(), null), "", "")
+                    .startUnconfigured(bind, port);
+            return;
+        }
         Path stateRoot = Paths.get(StrUtil.blankToDefault(System.getenv("DASHBOARD_STATE_DIR"), "/app/dashboard-state"));
         Path configDir = Paths.get(StrUtil.blankToDefault(System.getenv("DASHBOARD_CONFIG_DIR"), "/app/dashboard-config"));
         List<String> instances = new ArrayList<String>();
@@ -88,8 +93,7 @@ public final class DashboardServer {
                 .start(bind, port);
     }
 
-    /** 注册所有 API 路由。 */
-    private void registerApi() {
+    /** 注册所有 API 路由。 */    private void registerApi() {
         routes.get("/api/overview", request -> Routes.Reply.json(state.overview()));
         routes.get("/api/instances", request -> Routes.Reply.json(state.instanceList()));
         routes.get("/api/instances/{name}", request -> {
@@ -123,6 +127,52 @@ public final class DashboardServer {
         server.start();
         System.out.println("[看板] 已启动：http://" + bind + ":" + server.getAddress().getPort()
                 + "/ （账号 " + user + "）");
+        return server;
+    }
+
+    /**
+     * 未配置口令时的降级模式：只响应配置提示页，`/health` 返回未就绪，其他一律 503。
+     * 这样容器能稳定停在这里等人配置，而不是被 restart 策略反复拉起。
+     */
+    HttpServer startUnconfigured(String bind, int port) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress(bind, port), 0);
+        server.createContext("/", exchange -> {
+            try {
+                String path = exchange.getRequestURI().getPath();
+                String method = exchange.getRequestMethod();
+                if ("/health".equals(path)) {
+                    Routes.Reply.text(503, "text/plain;charset=utf-8", "not-configured").writeTo(exchange);
+                    return;
+                }
+                // 除提示页外一律拒绝：POST /login 也不能放过，否则空口令有被绕过的风险
+                if (path.startsWith("/api/") || "POST".equalsIgnoreCase(method)) {
+                    Routes.Reply.error(503, "看板尚未配置账号口令").writeTo(exchange);
+                    return;
+                }
+                String hint = "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+                        + "<title>看板未配置</title><style>body{font:14px/1.7 -apple-system,sans-serif;"
+                        + "background:#0e1116;color:#e6edf3;padding:48px;max-width:620px;margin:0 auto}"
+                        + "code{background:#1c232d;padding:2px 6px;border-radius:4px;"
+                        + "font-family:ui-monospace,monospace}h1{font-size:18px}"
+                        + "pre{background:#0a0d12;border:1px solid #26303c;border-radius:8px;padding:14px;"
+                        + "overflow-x:auto;font-family:ui-monospace,monospace;font-size:12px}"
+                        + ".muted{color:#8b98a5}</style></head><body>"
+                        + "<h1>看板还没有配置账号口令</h1>"
+                        + "<p class=\"muted\">为了避免无鉴权暴露签到状态，看板在配置完成前不提供任何数据。</p>"
+                        + "<p>在工作区创建 <code>.env.dashboard</code> 并填入账号和口令：</p>"
+                        + "<pre>cp .env.dashboard.example .env.dashboard\n"
+                        + "# 编辑 .env.dashboard，设置 DASHBOARD_USER 和 DASHBOARD_PASSWORD\n"
+                        + "docker compose up -d auto-sign-in-dashboard</pre>"
+                        + "<p class=\"muted\">口令请用 16 位以上随机串，不要与签到账号相同。</p>"
+                        + "</body></html>";
+                Routes.Reply.text(200, "text/html;charset=utf-8", hint).writeTo(exchange);
+            } finally {
+                exchange.close();
+            }
+        });
+        server.setExecutor(Executors.newFixedThreadPool(2));
+        server.start();
+        System.out.println("[看板] 配置提示页已启动：http://" + bind + ":" + server.getAddress().getPort() + "/");
         return server;
     }
 
@@ -235,7 +285,9 @@ public final class DashboardServer {
         JSONObject body = parseBody(exchange);
         String inputUser = StrUtil.trimToEmpty(body.getStr("username"));
         String inputPassword = StrUtil.nullToEmpty(body.getStr("password"));
-        if (!constantEquals(user, inputUser) || !constantEquals(password, inputPassword)) {
+        // 口令未配置时任何输入都不放行：空串和空串比较会相等，不能只靠 constantEquals。
+        boolean configured = StrUtil.isNotBlank(user) && StrUtil.isNotBlank(password);
+        if (!configured || !constantEquals(user, inputUser) || !constantEquals(password, inputPassword)) {
             int count = failure == null ? 1 : failure.count + 1;
             failures.put(remote, new Failure(count, Instant.now()));
             Routes.Reply.json(401, new JSONObject().set("error", "账号或口令不正确")).writeTo(exchange);

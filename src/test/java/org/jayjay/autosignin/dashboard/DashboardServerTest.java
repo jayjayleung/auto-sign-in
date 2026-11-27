@@ -135,6 +135,35 @@ public class DashboardServerTest {
         assertEquals("ok", response.body);
     }
 
+    @Test
+    public void 未配置口令时只给提示页且接口一律拒绝() throws Exception {
+        int port = freePort();
+        DashboardState empty = new DashboardState(null, Collections.<String>emptyList(), null);
+        HttpServer unconfigured = new DashboardServer(empty, "", "").startUnconfigured("127.0.0.1", port);
+        try {
+            String url = "http://127.0.0.1:" + port;
+            // 提示页可访问，告诉人怎么配
+            Response page = request(url, "GET", "/", null, null);
+            assertEquals(200, page.status);
+            assertTrue(page.body.contains("DASHBOARD_PASSWORD"));
+            assertTrue(page.body.contains(".env.dashboard"));
+
+            // 探针返回未就绪，便于外部发现
+            Response health = request(url, "GET", "/health", null, null);
+            assertEquals(503, health.status);
+
+            // 任何接口都不能拿到数据，也不能因为口令为空而被绕过
+            for (String path : Arrays.asList("/api/overview", "/api/instances", "/api/runs", "/api/config")) {
+                assertEquals("接口 " + path + " 必须拒绝", 503, request(url, "GET", path, null, null).status);
+            }
+            // 即便提交空账号口令也不行
+            assertEquals(503, request(url, "POST", "/login",
+                    "{\"username\":\"\",\"password\":\"\"}", null).status);
+        } finally {
+            unconfigured.stop(0);
+        }
+    }
+
     // ==================== 路由 ====================
 
     @Test
@@ -287,6 +316,12 @@ public class DashboardServerTest {
     }
 
     private Response request(String method, String path, String body, String cookie) throws Exception {
+        return request(baseUrl, method, path, body, cookie);
+    }
+
+    /** 指定 baseUrl 的重载，用于同一测试里起第二个服务。 */
+    private static Response request(String baseUrl, String method, String path, String body, String cookie)
+            throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(baseUrl + path).openConnection();
         connection.setRequestMethod(method);
         connection.setInstanceFollowRedirects(false);

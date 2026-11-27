@@ -43,15 +43,17 @@ services:
 #        max-file: "3"
 #    restart: always
 
-# 只读看板：复用同一个镜像，把三个实例的 state 和配置只读挂进来。
-# 先把 .env.dashboard.example 复制成 .env.dashboard 并设置 DASHBOARD_USER / DASHBOARD_PASSWORD，
-# 否则容器会因缺少账号口令而拒绝启动。
+# 只读看板（可选）：复用同一个镜像，把三个实例的 state 和配置只读挂进来。
+# 启用前先准备口令文件，否则打开 8090 只会看到一个配置提示页：
+#   cp .env.dashboard.example .env.dashboard   然后填 DASHBOARD_USER / DASHBOARD_PASSWORD
+# 没建这个文件也能正常用：此服务的 env_file 标了 required: false，签到容器不受影响。
 #  auto-sign-in-dashboard:
 #    build: .
 #    container_name: auto-sign-in-dashboard
 #    entrypoint: ["java", "-cp", "/app/app.jar", "org.jayjay.autosignin.dashboard.DashboardServer"]
 #    env_file:
-#      - .env.dashboard
+#      - path: .env.dashboard
+#        required: false
 #    volumes:
 #      - ./state:/app/dashboard-state:ro
 #      - ./.env:/app/dashboard-config/.env:ro
@@ -69,4 +71,4 @@ services:
 #      options:
 #        max-size: "10m"
 #        max-file: "2"
-#    restart: always
+#    restart: unless-stopped
