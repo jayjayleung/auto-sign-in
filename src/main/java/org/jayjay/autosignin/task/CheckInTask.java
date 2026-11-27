@@ -37,13 +37,15 @@ public abstract class CheckInTask {
         headers.put("Accept", "application/json, text/plain, */*");
         headers.put("Accept-Encoding", "gzip, deflate");
         headers.put("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6");
-        headers.put("Connection", "keep-alive");
         headers.put("Content-Type", "application/json;charset=UTF-8");
         headers.put("Sec-Fetch-Dest", "empty");
         headers.put("Sec-Fetch-Mode", "cors");
         headers.put("Sec-Fetch-Site", "same-origin");
         headers.put("User-Agent", userAgent);
-        headers.put("sec-ch-ua-platform", "Windows");
+        // 只给 Chrome 发 sec-ch-ua-platform 而不给 sec-ch-ua，本身就是一组对不上的指纹
+        headers.put("sec-ch-ua", "\"Chromium\";v=\"114\", \"Microsoft Edge\";v=\"114\", \"Not)A;Brand\";v=\"99\"");
+        headers.put("sec-ch-ua-mobile", "?0");
+        headers.put("sec-ch-ua-platform", "\"Windows\"");
         return headers;
     }
 

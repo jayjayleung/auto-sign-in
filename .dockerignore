@@ -1,0 +1,11 @@
+# 构建上下文只留源码和构建脚本，别把产物和浏览器缓存塞进镜像上下文
+.git
+.idea
+.cursor
+target
+.local-browser
+state
+docs
+*.md
+.env
+.env.*

@@ -27,7 +27,7 @@
         <dependency>
             <groupId>io.github.fanyong920</groupId>
             <artifactId>jvppeteer</artifactId>
-            <version>3.6.1</version>
+            <version>3.6.5</version>
         </dependency>
 
         <dependency>

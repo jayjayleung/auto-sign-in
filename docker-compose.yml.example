@@ -8,6 +8,8 @@ services:
       - ./.env:/app/config.env:ro
       # 持久化会话文件和去重标记，重建容器后不用重新登录
       - ./state/auto-sign-in:/app/state
+      # 浏览器通道用的 Chrome，下载一次就留在宿主机，重建容器不用重下
+      - ./state/auto-sign-in/browser:/app/.local-browser
       # 多账号互相采纳/评论的轮次文件，所有账号容器共用同一份
       - ./state/shared:/app/shared
     environment:
